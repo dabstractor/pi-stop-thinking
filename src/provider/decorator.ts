@@ -26,6 +26,8 @@ import type {
 } from "@earendil-works/pi-ai";
 import type { Config } from "../config";
 import type { Diagnostics } from "../diagnostics";
+import type { TransitionCoordinator } from "../state/coordinator";
+import type { Telemetry } from "../telemetry";
 
 /** The OpenAI-compatible api type that z.ai models use (PRD §19.6 Condition B). */
 export const OPENAI_COMPLETIONS_API = "openai-completions" as const;
@@ -83,6 +85,11 @@ export class ProviderDecorator {
    * Defaults to `() => false` (never disabled) so omitting the param is behavior-preserving.
    */
   private readonly _disabledProvider: () => boolean;
+  /** Session-scoped coordinator for active-proxy tracking (PRD §13.3/§37). Optional so
+   *  existing call sites (tests) remain unchanged. */
+  private readonly _coordinator?: TransitionCoordinator;
+  /** Privacy-safe telemetry recorder (PRD §35). Optional — omitted when telemetry is disabled. */
+  private readonly _telemetry?: Telemetry;
 
   /**
    * @param config      Configuration (reads `enabled` = Condition D, `supportedProviders` = Condition A).
@@ -99,11 +106,15 @@ export class ProviderDecorator {
     diagnostics: Diagnostics,
     registry: ProviderRegistry = DEFAULT_REGISTRY,
     disabledProvider?: () => boolean,
+    coordinator?: TransitionCoordinator,
+    telemetry?: Telemetry,
   ) {
     this.config = config;
     this.diagnostics = diagnostics;
     this.registry = registry;
     this._disabledProvider = disabledProvider ?? (() => false);
+    this._coordinator = coordinator;
+    this._telemetry = telemetry;
   }
 
   /**
@@ -187,7 +198,15 @@ export class ProviderDecorator {
           provider: String(model.provider),
           model: model.id,
         });
-        const proxy = new StreamProxy(model, context, options ?? {}, originalStreamSimple, this.diagnostics);
+        const proxy = new StreamProxy(
+          model, context, options ?? {}, originalStreamSimple, this.diagnostics,
+          undefined, undefined,
+          this.config.transitionTimeoutMs, undefined, this.config.replacementStartupTimeoutMs,
+          this._coordinator,
+        );
+        // INV-004: register this proxy as the active target for shortcut-driven stop requests.
+        this._coordinator?.setActiveProxy(proxy);
+        this._telemetry?.incrementCounter("RequestsDelegated");
         return proxy.output;
       }
 

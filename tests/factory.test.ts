@@ -29,7 +29,7 @@ function makeFakeFactory(opts: { initThrows?: boolean; shutdownThrows?: boolean 
   const built = makeFakeDecorator(opts);
   let calls = 0;
   let lastArgs: { config: unknown; diagnostics: unknown } | undefined;
-  const createDecorator: DecoratorFactory = (config, diagnostics) => {
+  const createDecorator: DecoratorFactory = (config, diagnostics, _services, _disabledProvider) => {
     calls++;
     lastArgs = { config, diagnostics };
     return built.decorator;
@@ -42,6 +42,7 @@ function makeFakeFactory(opts: { initThrows?: boolean; shutdownThrows?: boolean 
 function makeFakePi(opts: { registerFlagThrows?: boolean } = {}) {
   let shutdownHandler: ((e: unknown, ctx: unknown) => void) | null = null;
   const registeredFlags: Array<{ name: string; options: { type: string; default?: unknown; description?: string } }> = [];
+  const registeredShortcuts: Array<{ shortcut: string; options: { description: string; handler: () => void } }> = [];
   const flags = new Map<string, boolean | string>([["stop-thinking", true]]);
   const on = mock((event: string, handler: (e: unknown, ctx: unknown) => void) => {
     if (event === "session_shutdown") shutdownHandler = handler;
@@ -51,14 +52,19 @@ function makeFakePi(opts: { registerFlagThrows?: boolean } = {}) {
     flags.set(name, options.default ?? true);
     registeredFlags.push({ name, options });
   });
+  const registerShortcut = mock((shortcut: string, options: { description: string; handler: () => void }) => {
+    registeredShortcuts.push({ shortcut, options });
+  });
   const getFlag = mock((name: string) => flags.get(name));
-  const pi = { on, registerFlag, getFlag } as unknown as ExtensionAPI;
+  const pi = { on, registerFlag, registerShortcut, getFlag } as unknown as ExtensionAPI;
   return {
     pi,
     on,
     registerFlag,
+    registerShortcut,
     getFlag,
     registeredFlags,
+    registeredShortcuts,
     setFlagValue(name: string, value: boolean | string) {
       flags.set(name, value);
     },
@@ -171,9 +177,9 @@ describe("stopThinkingExtension — EC-011 flag registration + disable callback"
     let captured: (() => boolean) | undefined;
     stopThinkingExtension(
       pi.pi,
-      (config, diag, disabledProvider) => {
+      (config, diag, _services, disabledProvider) => {
         captured = disabledProvider;
-        return f.createDecorator(config, diag); // underlying fake ignores it
+        return f.createDecorator(config, diag, undefined as any, disabledProvider); // underlying fake ignores it
       },
     );
     expect(captured).toBeTypeOf("function");

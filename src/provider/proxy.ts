@@ -713,11 +713,6 @@ export class StreamProxy {
   }
 
   /**
-   * Build the minimal valid {@link AssistantMessage} carried by the synthesized terminal `error`
-   * event when `run` catches a thrown upstream. Content/usage are zeroed; stopReason is `"error"`;
-   * `errorMessage` carries the thrown message. Only used on the defensive path (never in normal flow).
-   */
-  /**
    * Launch the thinking-disabled replacement stream and drive the FSM through Restarting → Splicing
    * (PRD §16 / §40 / §51 Replacement Phase + Authority Transfer). Invoked from `run()`'s clean-abort branch
    * AFTER `completeAbort()` + `freeze()` (state is `Capturing`).

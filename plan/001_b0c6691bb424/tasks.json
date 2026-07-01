@@ -306,7 +306,7 @@
           "type": "Milestone",
           "id": "P1.M4",
           "title": "Phase 3 — Reasoning Detection: Buffer, Shortcut, and Coordinator",
-          "status": "Planned",
+          "status": "Researching",
           "description": "Implement reasoning event detection within the StreamProxy, the ReasoningBuffer for capturing thinking deltas, the ShortcutManager for keyboard input, and the TransitionCoordinator that bridges them.",
           "tasks": [
             {
@@ -371,14 +371,14 @@
               "type": "Task",
               "id": "P1.M4.T3",
               "title": "ShortcutManager Module",
-              "status": "Researching",
+              "status": "Complete",
               "description": "Register the configurable keyboard shortcut via pi.registerShortcut and forward stop requests to the TransitionCoordinator. Idempotent: duplicate presses during one transition are ignored.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M4.T3.S1",
                   "title": "ShortcutManager with idempotent stop request forwarding",
-                  "status": "Researching",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M1.T2.S1"
@@ -402,14 +402,14 @@
               "type": "Task",
               "id": "P1.M4.T4",
               "title": "TransitionCoordinator Bridge Module",
-              "status": "Planned",
+              "status": "Researching",
               "description": "Bridge between ShortcutManager (shortcut handler) and StreamProxy (active proxy instance). Holds a reference to the currently active proxy and delegates stop requests.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M4.T4.S1",
                   "title": "TransitionCoordinator with active proxy delegation",
-                  "status": "Planned",
+                  "status": "Researching",
                   "story_points": 2,
                   "dependencies": [
                     "P1.M4.T2.S1",

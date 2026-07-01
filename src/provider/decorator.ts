@@ -5,10 +5,10 @@
  * (ADR-003: Decorate the Built-in Provider). It captures the built-in `openai-completions` provider and
  * registers a wrapper under sourceId {@link STOP_THINKING_SOURCE_ID}.
  *
- * **Phase 0 scope (this subtask):** the wrapper is purely transparent. It evaluates the activation
- * conditions (PRD §19.5 / §19.6) and logs eligibility, but EVERY request — z.ai or not, reasoning or not
- * — is delegated byte-identically to the captured built-in (PRD §19.7 Pass-through Guarantee, ADR-005).
- * The StreamProxy that would actually intercept eligible z.ai reasoning streams is built in P1.M2.T3.S1.
+ * **Phase 1 scope:** the wrapper evaluates the activation conditions (PRD §19.5 / §19.6) and routes
+ * eligible z.ai reasoning requests through the transparent StreamProxy (PRD §19.5 "Construct Proxy →
+ * Delegate Initial Request → Monitor Stream"; PRD §19.7 Pass-through Guarantee, ADR-005). All other
+ * requests delegate directly to the captured built-in, byte-identically.
  *
  * The decoration is reversible: {@link ProviderDecorator.shutdown} unregisters via the sourceId,
  * restoring the built-in (PRD §28 Invariants; EC-012).
@@ -19,6 +19,7 @@ import {
   registerApiProvider,
   unregisterApiProviders,
 } from "@earendil-works/pi-ai";
+import { StreamProxy } from "./proxy";
 import type {
   ApiStreamFunction,
   ApiStreamSimpleFunction,
@@ -138,26 +139,31 @@ export class ProviderDecorator {
       //   A: provider in config.supportedProviders
       //   C: model.reasoning
       //   D: config.enabled
-      //   (E: not already interrupting — trivially true in Phase 0; modeled in P1.M4.T4.S1.)
+      //   (E: not already interrupting — trivially true in Phase 1; modelled in P1.M4.T4.S1.)
       const eligible =
         this.config.enabled &&
         model.reasoning &&
         this.config.supportedProviders.includes(String(model.provider));
 
       if (eligible) {
-        // Phase 0: even eligible requests delegate transparently (StreamProxy is built in P1.M2.T3.S1).
-        this.diagnostics.debug("provider.streamSimple.eligible-delegate", {
+        // z.ai reasoning model + feature enabled → route through the transparent StreamProxy
+        // (PRD §19.5 "Construct Proxy → Delegate Initial Request → Monitor Stream"; §19.6 A–E).
+        // Observational equivalence holds because the proxy only forwards events, unchanged, through a
+        // fresh AssistantMessageEventStream (PRD §19.7; §20.5 — downstream never touches the upstream).
+        this.diagnostics.debug("provider.streamSimple.proxy", {
           api: model.api,
           provider: String(model.provider),
           model: model.id,
         });
-      } else {
-        this.diagnostics.debug("provider.streamSimple.delegate", {
-          api: model.api,
-          provider: String(model.provider),
-          model: model.id,
-        });
+        const proxy = new StreamProxy(model, context, options ?? {}, originalStreamSimple, this.diagnostics);
+        return proxy.output;
       }
+
+      this.diagnostics.debug("provider.streamSimple.delegate", {
+        api: model.api,
+        provider: String(model.provider),
+        model: model.id,
+      });
       return originalStreamSimple(model, context, options);
     };
 

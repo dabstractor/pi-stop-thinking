@@ -1,4 +1,9 @@
 import { describe, test, expect } from "bun:test";
+import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
+import type {
+  AssistantMessageEvent,
+  AssistantMessageEventStream,
+} from "@earendil-works/pi-ai";
 import {
   ProviderDecorator,
   STOP_THINKING_SOURCE_ID,
@@ -40,9 +45,10 @@ const baseConfig: Config = {
 function makeFakeRegistry(opts: { present?: boolean } = {}) {
   const present = opts.present ?? true;
   const calls: string[] = [];
-  // The captured "built-in" delegates: record their args + return the SAME sentinel each call.
+  // The captured "built-in" delegates: record their args + return a real drivable stream for streamSimple.
   const builtinArgs: Array<readonly unknown[]> = [];
   const streamArgs: Array<readonly unknown[]> = [];
+  const simpleStreams: AssistantMessageEventStream[] = [];
   let callCountSimple = 0;
   let callCountStream = 0;
   const fakeProvider = {
@@ -57,7 +63,9 @@ function makeFakeRegistry(opts: { present?: boolean } = {}) {
       calls.push("builtin.streamSimple");
       builtinArgs.push(args);
       callCountSimple++;
-      return STREAM_SENTINEL;
+      const s = createAssistantMessageEventStream();
+      simpleStreams.push(s);
+      return s;
     },
   };
   let registeredProvider:
@@ -97,6 +105,7 @@ function makeFakeRegistry(opts: { present?: boolean } = {}) {
       },
       lastSimpleArgs: () => builtinArgs[builtinArgs.length - 1],
       lastStreamArgs: () => streamArgs[streamArgs.length - 1],
+      lastSimpleStream: () => simpleStreams[simpleStreams.length - 1],
     },
   };
 }
@@ -180,19 +189,37 @@ describe("ProviderDecorator — wrapper delegation (transparent, all branches)",
     return { f, d, wrapper };
   }
 
-  test("z.ai + reasoning + enabled (eligible) — STILL delegates transparently in Phase 0", () => {
+  const DONE_MESSAGE = { role: "assistant", content: [], model: "m" } as never;
+
+  test("z.ai + reasoning + enabled (eligible) — routes through StreamProxy: returns proxy.output and forwards events identically (PRD §19.7)", async () => {
     const { f, wrapper } = setup();
     const out = wrapper.streamSimple(mkModel(), ctx, opts);
-    expect(out).toBe(STREAM_SENTINEL); // identical stream reference (PRD §19.7)
-    expect(f.stats.simpleCalls).toBe(1);
-    expect(f.stats.lastSimpleArgs()).toEqual([mkModel(), ctx, opts]); // exact triple forwarded
+    const upstream = f.stats.lastSimpleStream();
+    expect(out).not.toBe(upstream);              // proxy.output, a fresh stream (PRD §20.5)
+    expect(f.stats.simpleCalls).toBe(1);          // proxy invoked the captured built-in exactly once
+
+    const seen: string[] = [];
+    const consumer = (async () => {
+      for await (const e of out) seen.push((e as AssistantMessageEvent).type);
+    })();
+    for (const e of [
+      { type: "start" },
+      { type: "text_delta", delta: "Hi", contentIndex: 0 },
+      { type: "done", reason: "stop", message: DONE_MESSAGE },
+    ] as never[]) {
+      upstream.push(e);
+      await new Promise((r) => setTimeout(r, 0));   // deterministic interleave
+    }
+    await consumer;
+    expect(seen).toEqual(["start", "text_delta", "done"]);   // byte-identical, in order
+    expect(await out.result()).toBe(DONE_MESSAGE);            // result() resolves to the done message
   });
 
   test("non-z.ai provider — delegates transparently", () => {
     const { f, wrapper } = setup();
     const m = mkModel({ provider: "openai" });
     const out = wrapper.streamSimple(m, ctx, opts);
-    expect(out).toBe(STREAM_SENTINEL);
+    expect(out).toBe(f.stats.lastSimpleStream());
     expect(f.stats.simpleCalls).toBe(1);
     expect(f.stats.lastSimpleArgs()).toEqual([m, ctx, opts]);
   });
@@ -200,7 +227,7 @@ describe("ProviderDecorator — wrapper delegation (transparent, all branches)",
   test("non-reasoning model — delegates transparently", () => {
     const { f, wrapper } = setup();
     const m = mkModel({ reasoning: false });
-    expect(wrapper.streamSimple(m, ctx, opts)).toBe(STREAM_SENTINEL);
+    expect(wrapper.streamSimple(m, ctx, opts)).toBe(f.stats.lastSimpleStream());
     expect(f.stats.simpleCalls).toBe(1);
   });
 
@@ -215,7 +242,7 @@ describe("ProviderDecorator — wrapper delegation (transparent, all branches)",
     const wrapper = f.registered as {
       streamSimple: (m: unknown, c: unknown, o: unknown) => unknown;
     };
-    expect(wrapper.streamSimple(mkModel(), ctx, opts)).toBe(STREAM_SENTINEL);
+    expect(wrapper.streamSimple(mkModel(), ctx, opts)).toBe(f.stats.lastSimpleStream());
     expect(f.stats.simpleCalls).toBe(1);
   });
 

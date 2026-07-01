@@ -151,7 +151,7 @@
           "type": "Milestone",
           "id": "P1.M2",
           "title": "Phase 1 — Event Proxy: Transparent StreamProxy with Event Forwarding",
-          "status": "Planned",
+          "status": "Researching",
           "description": "Insert the StreamProxy between Pi and the captured provider without changing observable behavior. The proxy forwards all events, validates ordering, and provides the infrastructure for later interruption — but performs no interception yet.",
           "tasks": [
             {
@@ -215,14 +215,14 @@
               "type": "Task",
               "id": "P1.M2.T3",
               "title": "Wire StreamProxy into ProviderDecorator for z.ai Models",
-              "status": "Researching",
+              "status": "Complete",
               "description": "Update the ProviderDecorator's wrapper to construct a StreamProxy for z.ai reasoning models instead of direct delegation. This changes the internal path but not the observable output.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M2.T3.S1",
                   "title": "Activate StreamProxy for z.ai reasoning models in the wrapper",
-                  "status": "Researching",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M2.T2.S1",
@@ -241,14 +241,14 @@
               "type": "Task",
               "id": "P1.M2.T4",
               "title": "Golden Stream Replay Test Infrastructure",
-              "status": "Planned",
+              "status": "Researching",
               "description": "Create the test infrastructure for golden stream replay: capture real provider event sequences and assert byte-for-byte equivalent downstream output through the proxy.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M2.T4.S1",
                   "title": "Golden replay test harness and fixtures",
-                  "status": "Planned",
+                  "status": "Researching",
                   "story_points": 2,
                   "dependencies": [
                     "P1.M2.T3.S1"

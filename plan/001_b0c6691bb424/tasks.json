@@ -735,14 +735,14 @@
               "type": "Task",
               "id": "P1.M8.T3",
               "title": "Extension Lifecycle and Re-registration Handling",
-              "status": "Ready",
+              "status": "Complete",
               "description": "Handle extension disable/unload/reload scenarios (EC-011 through EC-016) to ensure clean lifecycle management.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M8.T3.S1",
                   "title": "Session shutdown cleanup and provider restoration",
-                  "status": "Ready",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M7.T3.S1"
@@ -761,14 +761,14 @@
               "type": "Task",
               "id": "P1.M8.T4",
               "title": "Stress, Chaos, and Property-Based Testing",
-              "status": "Planned",
+              "status": "Researching",
               "description": "Comprehensive testing beyond unit tests: stress tests with thousands of interruptions, chaos tests with random failures, property tests for invariants, and golden replay regression tests.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M8.T4.S1",
                   "title": "Property tests and stress test suite",
-                  "status": "Planned",
+                  "status": "Researching",
                   "story_points": 2,
                   "dependencies": [
                     "P1.M8.T2.S2",

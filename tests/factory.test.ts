@@ -37,16 +37,31 @@ function makeFakeFactory(opts: { initThrows?: boolean; shutdownThrows?: boolean 
   return { createDecorator, ...built, getCalls: () => calls, lastArgs: () => lastArgs };
 }
 
-/** Minimal fake ExtensionAPI: captures the session_shutdown handler; no-ops everything else. */
-function makeFakePi() {
+/** Minimal fake ExtensionAPI: captures the session_shutdown handler; records registerFlag calls;
+ * supports controllable getFlag. No-ops everything else. */
+function makeFakePi(opts: { registerFlagThrows?: boolean } = {}) {
   let shutdownHandler: ((e: unknown, ctx: unknown) => void) | null = null;
+  const registeredFlags: Array<{ name: string; options: { type: string; default?: unknown; description?: string } }> = [];
+  const flags = new Map<string, boolean | string>([["stop-thinking", true]]);
   const on = mock((event: string, handler: (e: unknown, ctx: unknown) => void) => {
     if (event === "session_shutdown") shutdownHandler = handler;
   });
-  const pi = { on } as unknown as ExtensionAPI;
+  const registerFlag = mock((name: string, options: { type: string; default?: unknown; description?: string }) => {
+    if (opts.registerFlagThrows) throw new Error("registerFlag boom");
+    flags.set(name, options.default ?? true);
+    registeredFlags.push({ name, options });
+  });
+  const getFlag = mock((name: string) => flags.get(name));
+  const pi = { on, registerFlag, getFlag } as unknown as ExtensionAPI;
   return {
     pi,
     on,
+    registerFlag,
+    getFlag,
+    registeredFlags,
+    setFlagValue(name: string, value: boolean | string) {
+      flags.set(name, value);
+    },
     get shutdownRegistered() {
       return shutdownHandler !== null;
     },
@@ -136,6 +151,52 @@ describe("stopThinkingExtension — init failure isolation (never crash Pi)", ()
     const errorOutput = errors.join("\n");
     expect(errorOutput).toContain("extension.init-failed");
     expect(errorOutput).toContain("init boom");
+  });
+});
+
+describe("stopThinkingExtension — EC-011 flag registration + disable callback", () => {
+  test("registers the stop-thinking boolean flag (default true) exactly once", () => {
+    const f = makeFakeFactory();
+    const pi = makeFakePi();
+    stopThinkingExtension(pi.pi, f.createDecorator);
+    const reg = pi.registeredFlags.find((x) => x.name === "stop-thinking");
+    expect(reg).toBeDefined();
+    expect(reg.options.type).toBe("boolean");
+    expect(reg.options.default).toBe(true);
+  });
+
+  test("the disable callback reflects the LIVE getFlag value (per-request read)", () => {
+    const f = makeFakeFactory();
+    const pi = makeFakePi();
+    let captured: (() => boolean) | undefined;
+    stopThinkingExtension(
+      pi.pi,
+      (config, diag, disabledProvider) => {
+        captured = disabledProvider;
+        return f.createDecorator(config, diag); // underlying fake ignores it
+      },
+    );
+    expect(captured).toBeTypeOf("function");
+    pi.setFlagValue("stop-thinking", true); expect(captured!()).toBe(false); // enabled → not disabled
+    pi.setFlagValue("stop-thinking", false); expect(captured!()).toBe(true); // disabled
+  });
+
+  test("a registerFlag fault is swallowed (warned) and decoration STILL proceeds", () => {
+    const f = makeFakeFactory();
+    const pi = makeFakePi({ registerFlagThrows: true });
+    expect(() => stopThinkingExtension(pi.pi, f.createDecorator)).not.toThrow();
+    expect(f.initialize).toHaveBeenCalledTimes(1); // decoration proceeded despite the flag fault
+    expect(pi.shutdownRegistered).toBe(true); // session_shutdown still registered
+  });
+});
+
+describe("stopThinkingExtension — EC-012 session_shutdown restores registration", () => {
+  test("firing session_shutdown calls decorator.shutdown() exactly once (no orphan)", () => {
+    const f = makeFakeFactory();
+    const pi = makeFakePi();
+    stopThinkingExtension(pi.pi, f.createDecorator);
+    pi.fireShutdown();
+    expect(f.shutdown).toHaveBeenCalledTimes(1); // → unregisterApiProviders(sourceId) in the real decorator
   });
 });
 

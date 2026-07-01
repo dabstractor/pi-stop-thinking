@@ -73,6 +73,16 @@ export class ProviderDecorator {
   private readonly registry: ProviderRegistry;
   private original: CapturedProvider | undefined;
   private registered = false;
+  /**
+   * EC-011 (PRD Appendix B): runtime disable check, evaluated PER REQUEST. The factory supplies
+   * `() => pi.getFlag("stop-thinking") === false` so a CLI flag (--no-stop-thinking) or a runtime
+   * setFlagValue change takes effect for the NEXT request. When true, wrapperStreamSimple delegates
+   * directly to the captured built-in WITHOUT constructing a StreamProxy. ACTIVE transitions are
+   * unaffected: each already-constructed proxy holds its own captured originalStreamSimple closure and
+   * is unreachable from the decorator after construction (the flag is checked only at request start).
+   * Defaults to `() => false` (never disabled) so omitting the param is behavior-preserving.
+   */
+  private readonly _disabledProvider: () => boolean;
 
   /**
    * @param config      Configuration (reads `enabled` = Condition D, `supportedProviders` = Condition A).
@@ -80,11 +90,20 @@ export class ProviderDecorator {
    * @param registry    Optional pi-ai registry bundle for DI. Defaults to the real functions; tests pass
    *                    capturing doubles. **Privacy (Appendix H):** only `provider`/`model`/`api` metadata
    *                    are ever passed to diagnostics — never options, context, or stream content.
+   * @param disabledProvider Optional per-request disable callback (EC-011). When it returns `true`,
+   *                    the wrapper delegates directly without constructing a StreamProxy. Defaults to
+   *                    `() => false` (never disabled) so omitting it preserves every existing call site.
    */
-  constructor(config: Config, diagnostics: Diagnostics, registry: ProviderRegistry = DEFAULT_REGISTRY) {
+  constructor(
+    config: Config,
+    diagnostics: Diagnostics,
+    registry: ProviderRegistry = DEFAULT_REGISTRY,
+    disabledProvider?: () => boolean,
+  ) {
     this.config = config;
     this.diagnostics = diagnostics;
     this.registry = registry;
+    this._disabledProvider = disabledProvider ?? (() => false);
   }
 
   /**
@@ -135,6 +154,19 @@ export class ProviderDecorator {
     };
 
     const wrapperStreamSimple: ApiStreamSimpleFunction = (model, context, options) => {
+      // EC-011 (PRD Appendix B): runtime disable flag (e.g. --no-stop-thinking). When disabled, delegate to
+      // the captured built-in WITHOUT constructing a StreamProxy for NEW requests. An ACTIVE transition
+      // (already-constructed proxy) is unreachable here — it runs on its own closure to completion. This is
+      // distinct from EC-016 (config.enabled), which is checked in `eligible` below.
+      if (this._disabledProvider()) {
+        this.diagnostics.debug("provider.streamSimple.disabled-delegate", {
+          api: model.api,
+          provider: String(model.provider),
+          model: model.id,
+        });
+        return originalStreamSimple(model, context, options);
+      }
+
       // Activation conditions per PRD §19.5 / §19.6 (B is guaranteed by the registry's api-guard):
       //   A: provider in config.supportedProviders
       //   C: model.reasoning

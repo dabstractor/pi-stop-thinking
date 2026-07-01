@@ -1,4 +1,4 @@
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, mock } from "bun:test";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import type {
   AssistantMessageEvent,
@@ -353,6 +353,69 @@ describe("ProviderDecorator — shutdown", () => {
     expect(
       f.calls.filter((c) => c.startsWith("registerApiProvider")).length,
     ).toBe(2);
+  });
+});
+
+describe("ProviderDecorator — EC-011 runtime disable", () => {
+  function setup(disabledProvider?: () => boolean) {
+    const f = makeFakeRegistry();
+    const d = new ProviderDecorator(baseConfig, noopDiagnostics, f.registry, disabledProvider);
+    d.initialize();
+    const wrapper = f.registered as {
+      streamSimple: (m: unknown, c: unknown, o: unknown) => unknown;
+    };
+    return { f, d, wrapper };
+  }
+
+  test("disabled → an eligible z.ai reasoning request delegates WITHOUT constructing a proxy", () => {
+    const { f, wrapper } = setup(() => true);
+    const out = wrapper.streamSimple(mkModel(), ctx, opts);
+    // The fake builtin returns a real AssistantMessageEventStream (not the STREAM_SENTINEL),
+    // so we check that the output IS the builtin's stream (delegated) and NOT a proxy output.
+    expect(f.stats.simpleCalls).toBe(1);
+    expect(out).toBe(f.stats.lastSimpleStream());
+    expect(f.stats.lastSimpleArgs()).toEqual([mkModel(), ctx, opts]);
+  });
+
+  test("disabledProvider = () => false (default when omitted) → eligible STILL builds a proxy", () => {
+    // 3-arg ctor → never disabled → existing behavior preserved (regression guard)
+    const f = makeFakeRegistry();
+    const d = new ProviderDecorator(baseConfig, noopDiagnostics, f.registry);
+    d.initialize();
+    const wrapper = f.registered as {
+      streamSimple: (m: unknown, c: unknown, o: unknown) => unknown;
+    };
+    const out = wrapper.streamSimple(mkModel(), ctx, opts);
+    expect(out).not.toBe(f.stats.lastSimpleStream()); // proxy.output (a fresh stream)
+  });
+
+  test("an ACTIVE transition is unaffected when the flag flips to disabled after construction", () => {
+    let flag = false; // enabled at construction
+    const { f, wrapper } = setup(() => flag);
+    const proxyOutput = wrapper.streamSimple(mkModel(), ctx, opts); // builds a proxy (flag=false)
+    expect(proxyOutput).not.toBe(f.stats.lastSimpleStream()); // proxy.output, NOT the raw builtin
+    flag = true; // disable AFTER the proxy exists
+    // The already-returned proxyOutput is the SAME live stream; the decorator cannot reach/tear it down.
+    // NEW request bypasses proxy → delegates directly to builtin (no proxy constructed).
+    const outAfterFlip = wrapper.streamSimple(mkModel(), ctx, opts);
+    expect(outAfterFlip).toBe(f.stats.lastSimpleStream()); // delegated directly, no proxy
+    // The first proxyOutput is unaffected (it holds its own closure).
+    expect(proxyOutput).not.toBe(outAfterFlip);
+    // (the decorator cannot reach the already-constructed proxy; we assert it merely routes the
+    //  next request past it, which is the observable EC-011 contract.)
+  });
+});
+
+describe("ProviderDecorator — EC-012 no orphaned registration after shutdown", () => {
+  test("shutdown removes our registration; the builtin is what a future lookup returns; re-init works", () => {
+    const f = makeFakeRegistry();
+    const d = new ProviderDecorator(baseConfig, noopDiagnostics, f.registry);
+    d.initialize();
+    expect(f.registered).not.toBeNull();
+    d.shutdown();
+    expect(f.registered).toBeNull(); // no orphan (EC-012 "registration restored")
+    d.initialize(); // EC-013 re-init re-captures + re-registers
+    expect(f.registered).not.toBeNull();
   });
 });
 

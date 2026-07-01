@@ -38,11 +38,15 @@ export interface DecoratorLifecycle {
  * dependency-injection seam the entry point exposes; Pi calls the default export with a single argument, so
  * the seam is invisible in production. (Mirrors the decorator's own optional `registry?` DI convention.)
  */
-export type DecoratorFactory = (config: Config, diagnostics: Diagnostics) => DecoratorLifecycle;
+export type DecoratorFactory = (
+  config: Config,
+  diagnostics: Diagnostics,
+  disabledProvider?: () => boolean,
+) => DecoratorLifecycle;
 
 /** Default decorator factory: constructs the real {@link ProviderDecorator} (real pi-ai registry). */
-const createDefaultDecorator: DecoratorFactory = (config, diagnostics) =>
-  new ProviderDecorator(config, diagnostics);
+const createDefaultDecorator: DecoratorFactory = (config, diagnostics, disabledProvider) =>
+  new ProviderDecorator(config, diagnostics, undefined, disabledProvider);
 
 /**
  * Pi extension factory. Wires the Phase-0 foundation and registers cleanup.
@@ -79,8 +83,27 @@ export default function stopThinkingExtension(
     // (2) Structured logger (PRD §36).
     diagnostics = createDiagnostics(config.diagnosticsLevel);
 
+    // EC-011: register the CLI disable flag. Non-fatal (own try/catch) — a fault is warned + decoration
+    // proceeds; getFlag then yields undefined → the callback returns "not disabled".
+    try {
+      pi.registerFlag("stop-thinking", {
+        type: "boolean",
+        default: true,
+        description: "Enable Stop Thinking & Do — interrupt z.ai reasoning and answer directly.",
+      });
+    } catch (err) {
+      diagnostics.warn("extension.flag-register-failed", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+
     // (3) Construct the decorator (real registry by default; fake under test).
-    const decorator = createDecorator(config, diagnostics);
+    // Thread the LIVE disable check (per-request getFlag read) into the decorator.
+    const decorator = createDecorator(
+      config,
+      diagnostics,
+      () => pi.getFlag("stop-thinking") === false,
+    );
 
     // (4) Capture + register the transparent wrapper. May throw (built-in provider absent) — caught below.
     decorator.initialize();

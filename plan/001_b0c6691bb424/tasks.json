@@ -185,14 +185,14 @@
               "type": "Task",
               "id": "P1.M2.T2",
               "title": "StreamProxy: Transparent Event Forwarding",
-              "status": "Researching",
+              "status": "Complete",
               "description": "Implement the StreamProxy that creates a downstream AssistantMessageEventStream, iterates the upstream provider stream, and forwards every event unchanged. No interception logic yet — purely pass-through.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M2.T2.S1",
                   "title": "StreamProxy class with forward-only pipeline",
-                  "status": "Researching",
+                  "status": "Complete",
                   "story_points": 2,
                   "dependencies": [
                     "P1.M2.T1.S1",
@@ -215,14 +215,14 @@
               "type": "Task",
               "id": "P1.M2.T3",
               "title": "Wire StreamProxy into ProviderDecorator for z.ai Models",
-              "status": "Planned",
+              "status": "Researching",
               "description": "Update the ProviderDecorator's wrapper to construct a StreamProxy for z.ai reasoning models instead of direct delegation. This changes the internal path but not the observable output.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M2.T3.S1",
                   "title": "Activate StreamProxy for z.ai reasoning models in the wrapper",
-                  "status": "Planned",
+                  "status": "Researching",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M2.T2.S1",

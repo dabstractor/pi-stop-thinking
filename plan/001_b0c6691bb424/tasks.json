@@ -268,21 +268,21 @@
           "type": "Milestone",
           "id": "P1.M3",
           "title": "Phase 2 — Transition State Machine: Explicit FSM with Validated Transitions",
-          "status": "Researching",
+          "status": "Complete",
           "description": "Implement the TransitionController as an explicit finite-state machine that owns interruption lifecycle state. All transitions must be validated; illegal transitions must be impossible.",
           "tasks": [
             {
               "type": "Task",
               "id": "P1.M3.T1",
               "title": "TransitionController FSM Core",
-              "status": "Researching",
+              "status": "Complete",
               "description": "Implement the state machine with all states, the transition table, and validation.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M3.T1.S1",
                   "title": "TransitionController class with state table and validation",
-                  "status": "Researching",
+                  "status": "Complete",
                   "story_points": 2,
                   "dependencies": [
                     "P1.M2.T1.S1",
@@ -313,14 +313,14 @@
               "type": "Task",
               "id": "P1.M4.T1",
               "title": "ReasoningBuffer Module",
-              "status": "Planned",
+              "status": "Researching",
               "description": "Append-only buffer that captures reasoning events before interruption, tracks ordering and offsets, and exposes an immutable snapshot after freeze.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M4.T1.S1",
                   "title": "ReasoningBuffer append-only collection with freeze/snapshot",
-                  "status": "Planned",
+                  "status": "Researching",
                   "story_points": 2,
                   "dependencies": [
                     "P1.M2.T1.S1",

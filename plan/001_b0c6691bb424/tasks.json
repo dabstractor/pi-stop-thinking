@@ -65,14 +65,14 @@
               "type": "Task",
               "id": "P1.M1.T3",
               "title": "Diagnostics Module",
-              "status": "Researching",
+              "status": "Complete",
               "description": "Implement structured logging that never modifies runtime behavior. Supports trace/debug/info/warn/error levels, disabled by default.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M1.T3.S1",
                   "title": "Structured logger with privacy controls",
-                  "status": "Researching",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M1.T2.S1"
@@ -90,14 +90,14 @@
               "type": "Task",
               "id": "P1.M1.T4",
               "title": "Provider Decorator: Capture and Transparent Delegation",
-              "status": "Planned",
+              "status": "Researching",
               "description": "Implement the ProviderDecorator that captures the built-in openai-completions provider via getApiProvider(), creates a wrapper streamSimple that delegates transparently, and registers the wrapper via registerApiProvider(). This must produce zero behavioral changes.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M1.T4.S1",
                   "title": "Provider capture and wrapper registration",
-                  "status": "Planned",
+                  "status": "Researching",
                   "story_points": 2,
                   "dependencies": [
                     "P1.M1.T2.S1",

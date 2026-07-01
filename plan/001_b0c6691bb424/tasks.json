@@ -341,14 +341,14 @@
               "type": "Task",
               "id": "P1.M4.T2",
               "title": "Reasoning Detection Logic in StreamProxy",
-              "status": "Researching",
+              "status": "Complete",
               "description": "Add reasoning state tracking to the StreamProxy event loop: detect thinking_start/thinking_delta/thinking_end/text_start, drive the TransitionController state, and populate the ReasoningBuffer.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M4.T2.S1",
                   "title": "StreamProxy reasoning event tracking and state transitions",
-                  "status": "Researching",
+                  "status": "Complete",
                   "story_points": 2,
                   "dependencies": [
                     "P1.M2.T2.S1",
@@ -371,14 +371,14 @@
               "type": "Task",
               "id": "P1.M4.T3",
               "title": "ShortcutManager Module",
-              "status": "Planned",
+              "status": "Researching",
               "description": "Register the configurable keyboard shortcut via pi.registerShortcut and forward stop requests to the TransitionCoordinator. Idempotent: duplicate presses during one transition are ignored.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M4.T3.S1",
                   "title": "ShortcutManager with idempotent stop request forwarding",
-                  "status": "Planned",
+                  "status": "Researching",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M1.T2.S1"

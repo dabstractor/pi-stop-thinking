@@ -67,14 +67,14 @@
               "type": "Task",
               "id": "P1.M2.T1",
               "title": "Capture primary frozen content blocks at the abort boundary",
-              "status": "Planned",
+              "status": "Complete",
               "description": "Add data-plumbing to StreamProxy so the primary stream's structured content blocks (the thinking blocks from event.partial) are captured and deep-cloned at the freeze boundary. This produces the frozen block array and the contentIndex offset that the replacement-event rewrite (T2) consumes.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M2.T1.S1",
                   "title": "Capture primary partial content blocks and compute contentIndex offset at freeze",
-                  "status": "Planned",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M1.T1.S2"

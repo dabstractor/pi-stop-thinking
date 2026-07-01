@@ -141,6 +141,28 @@ export class StreamProxy {
    * authoritative; flips to `"splicing"` when the first replacement event is accepted (authority transfer —
    * irreversible per PRD §39/§51). Read by P1.M7.T2/T3.
    */
+  /**
+   * P1.M2.T1.S1 — the most-recent primary `event.partial` (the provider's live accumulating
+   * `output` object). Set on every non-terminal primary event (last one wins, carrying the most-complete
+   * content). Undefined when no primary partial was captured (placeholder mocks). Seed data for the
+   * replacement rewrite (P1.M2.T2.S1).
+   */
+  private _primaryPartial: AssistantMessage | undefined;
+
+  /**
+   * P1.M2.T1.S1 — shallow-per-block clone of `_primaryPartial.content` at the abort/freeze boundary.
+   * Each block is `{ ...b }` (plain data clone; NOT structuredClone). Empty when no primary partial was
+   * captured. Seed data for the replacement rewrite (P1.M2.T2.S1).
+   */
+  private _frozenPrimaryContent: ReadonlyArray<Record<string, unknown>> = [];
+
+  /**
+   * P1.M2.T1.S1 — the number of primary content blocks at freeze time (= `_frozenPrimaryContent.length`).
+   * Used by the replacement rewrite (P1.M2.T2.S1) to offset replacement contentIndex so text lands after
+   * the prepended reasoning blocks.
+   */
+  private _contentIndexOffset = 0;
+
   private _authority: ProxyPhase = "forwarding";
 
   /**
@@ -278,6 +300,23 @@ export class StreamProxy {
    */
   get authority(): ProxyPhase {
     return this._authority;
+  }
+
+  /**
+   * P1.M2.T1.S1 — read-only snapshot of the primary stream's content blocks at the abort boundary.
+   * Each block is a shallow clone of the original `event.partial.content` entry. Consumed by the
+   * replacement rewrite (P1.M2.T2.S1) to prepend reasoning to the replacement answer.
+   */
+  get frozenPrimaryContent(): ReadonlyArray<Record<string, unknown>> {
+    return this._frozenPrimaryContent;
+  }
+
+  /**
+   * P1.M2.T1.S1 — the contentIndex offset (= number of frozen primary content blocks). Consumed by the
+   * replacement rewrite (P1.M2.T2.S1) to offset replacement contentIndex so text lands after reasoning.
+   */
+  get contentIndexOffset(): number {
+    return this._contentIndexOffset;
   }
 
   /** Whether reasoning is currently flowing (PRD §22.5). P1.M4.T4's coordinator delegates to this. */
@@ -640,6 +679,11 @@ export class StreamProxy {
       for await (const event of upstream) {
         this.trackEvent(event);   // side-effect reasoning detection; never throws; never mutates event
         this._emit(event);        // §18 filtering: forwarding phase → forward all; set INV-002/INV-003 flags
+        // P1.M2.T1.S1 — capture the provider's live accumulating partial (last non-terminal wins).
+        // Narrow with !isTerminalEvent FIRST: done/error members lack .partial → tsc error if bare.
+        if (!isTerminalEvent(event) && event.partial) {
+          this._primaryPartial = event.partial;
+        }
         // FM-005 / EC-007 / RC-001 (P1.M5.T2.S1): the upstream emitted its OWN terminal. If an abort is in
         // flight but the upstream completed naturally, this flag lets natural completion win (see below).
         if (isTerminalEvent(event)) {
@@ -687,6 +731,10 @@ export class StreamProxy {
           });
         }
         this._buffer.freeze(); // (PRD §41: reasoning immutable once frozen; §40: replacement needs this)
+        // P1.M2.T1.S1 — snapshot the primary's structured content blocks (shallow-per-block clone).
+        // When _primaryPartial is undefined (placeholder mocks), frozen content is [] and offset is 0.
+        this._frozenPrimaryContent = (this._primaryPartial?.content ?? []).map((b) => ({ ...b }));
+        this._contentIndexOffset = this._frozenPrimaryContent.length;
         this.diagnostics.trace("proxy.abort.completed", {});
         // PRD §40: primary aborted + reasoning frozen → launch the thinking-disabled replacement and drive the
         // FSM through Restarting → Splicing (PRD §16/§51). output stays OPEN; the replacement owns the terminal.

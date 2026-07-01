@@ -60,7 +60,7 @@ import type {
 } from "@earendil-works/pi-ai";
 import type { Diagnostics } from "../diagnostics";
 // Re-exported by P1.M2.T1.S1 (single local vocabulary); same type as the pi-ai symbol.
-import type { AssistantMessageEvent, TransitionState, ProxyPhase } from "../types";
+import type { AssistantMessageEvent, TransitionState, ProxyPhase, TerminalEvent } from "../types";
 import { isTerminalEvent, isThinkingEvent, isTextEvent, isToolCallEvent, isMalformedEvent } from "../types";
 import type { TransitionCoordinator } from "../state/coordinator";
 import { RequestBuilder } from "../request/builder";
@@ -651,6 +651,18 @@ export class StreamProxy {
     if (this._contentIndexOffset > 0 && "contentIndex" in event) {
       event = this._rewriteReplacementEvent(event);
     }
+    // P1.M2.T2.S2 — Issue 1 fix: rewrite the replacement TERMINAL (done.message / error.error) to merge the
+    // frozen primary reasoning, so output.result() — what the consumer PERSISTS (agent-loop.js
+    // finalMessage = response.result() = done.message) — resolves to the unified [thinking, ...] message
+    // instead of the replacement's text-only output. push(terminal) IMMEDIATELY resolves result() with
+    // event.message/event.error (pi-ai-event-types.md §3), so this MUST run BEFORE the push below. Same
+    // offset>0 guard as T2.S1 → no-op when offset is 0 (preserves the existing offset-0 error-path suite).
+    // Terminals carry NO contentIndex (they skip T2.S1's contentIndex-offset gate above) but still need the
+    // message/error content merge so the PERSISTED message keeps the reasoning. Only the FIRST terminal reaches
+    // here (duplicates early-return above). REUSES _mergePartial (T2.S1) — no new merge logic.
+    if (this._contentIndexOffset > 0 && isTerminalEvent(event)) {
+      event = this._rewriteReplacementTerminal(event);
+    }
     // text_start/delta/end + toolcall_* (and the first terminal) → forward.
     this._output.push(event);
   }
@@ -953,6 +965,24 @@ export class StreamProxy {
     const contentIndex = ("contentIndex" in event ? event.contentIndex : 0) + this._contentIndexOffset;
     const partial = this._mergePartial("partial" in event ? event.partial : undefined);
     return { ...event, contentIndex, partial } as AssistantMessageEvent;
+  }
+
+  /**
+   * P1.M2.T2.S2 — rewrite the replacement TERMINAL event (`done`/`error`) to merge the frozen primary reasoning
+   * into its `message`/`error` field (Issue 1 fix — the PERSISTENCE half). The downstream consumer
+   * (`pi-agent-core` agent-loop.js) persists `finalMessage = await response.result()`, which resolves to the
+   * terminal's `message`/`error` field. Without this rewrite, `result()` resolves to the replacement's text-only
+   * output → the reasoning the user watched is lost from conversation history (even though T2.S1 already merged it
+   * into the streamed `partial`s). `push(terminal)` IMMEDIATELY resolves `result()` with `event.message`/`event.error`
+   * (pi-ai-event-types.md §3), so the call-site gate runs this BEFORE the push. REUSES {@link _mergePartial} (T2.S1)
+   * so the terminal merge is byte-identical to the non-terminal partial merge. Seed data is captured by P1.M2.T1.S1.
+   */
+  private _rewriteReplacementTerminal(event: TerminalEvent): TerminalEvent {
+    if (event.type === "done") {
+      return { ...event, message: this._mergePartial(event.message) };
+    }
+    // event.type === "error" — merge the frozen reasoning into the error message (covers replacement failures too).
+    return { ...event, error: this._mergePartial(event.error) };
   }
 
   private makeErrorAssistantMessage(model: Model<Api>, message: string): AssistantMessage {

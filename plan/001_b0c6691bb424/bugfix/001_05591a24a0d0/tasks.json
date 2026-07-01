@@ -92,7 +92,7 @@
               "type": "Task",
               "id": "P1.M2.T2",
               "title": "Rewrite replacement events to merge primary reasoning with answer content",
-              "status": "Planned",
+              "status": "Complete",
               "description": "In StreamProxy._emit() (the single forwarding chokepoint), when authority is 'splicing' and frozen primary content was captured, transform every replacement event before pushing: offset its contentIndex past the primary's blocks, and rewrite its partial (and the terminal done/error message) to a merged AssistantMessage whose content is [...frozenPrimaryBlocks, ...replacementBlocks]. This makes the consumer assemble a single unified [thinking, text] message.",
               "subtasks": [
                 {
@@ -115,7 +115,7 @@
                   "type": "Subtask",
                   "id": "P1.M2.T2.S2",
                   "title": "Rewrite replacement terminal event: merge done message (and error) content",
-                  "status": "Planned",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M2.T2.S1"

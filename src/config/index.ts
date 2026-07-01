@@ -16,7 +16,12 @@ export type DiagnosticsLevel = "error" | "warn" | "info" | "debug" | "trace";
 export interface Config {
   /** Master switch. When `false`, the provider decorator delegates transparently (EC-016). Default: `true`. */
   enabled: boolean;
-  /** Keyboard shortcut (Pi `KeyId`, lowercase) that raises the stop signal. Default: `"ctrl+."`. */
+  /** Keyboard shortcut (Pi `KeyId`, lowercase) that raises the stop signal. Default: `"ctrl+q"`.
+   *
+   * NOTE: pi-tui can only MATCH certain key combos against real terminal input — reliably
+   * `ctrl+<letter a-z>` (plus `ctrl+[ \\ ] _ -` and special keys). Symbol combos such as
+   * `ctrl+.` are NOT matchable in legacy terminals and will register but never fire. The
+   * default `ctrl+q` is matchable and unbound by Pi. See README → Configuration. */
   shortcut: string;
   /** Provider ids whose reasoning streams may be interrupted (decorator activation check A). Default: `["zai"]`. */
   supportedProviders: string[];
@@ -38,7 +43,7 @@ export interface Config {
  */
 export const DEFAULT_CONFIG: Config = Object.freeze({
   enabled: true,
-  shortcut: "ctrl+.",
+  shortcut: "ctrl+q",
   supportedProviders: Object.freeze(["zai"]),
   transitionTimeoutMs: 5000,
   replacementStartupTimeoutMs: 10000,
@@ -116,4 +121,86 @@ export function validateConfig(config: unknown): Config {
  */
 export function loadConfig(partial?: Partial<Config>): Config {
   return validateConfig({ ...DEFAULT_CONFIG, ...(partial ?? {}) });
+}
+
+/**
+ * Environment-variable namespace for runtime configuration (PRD §47). Pi's ExtensionAPI
+ * exposes no settings object to extensions, so user configuration is supplied via
+ * `PI_STOP_THINKING_*` environment variables (set in the shell or a launcher). Every field
+ * is OPTIONAL: an unset or unparseable value is omitted and {@link validateConfig} falls
+ * back to that field's default, so a bad value can never prevent normal provider delegation
+ * (PRD Appendix K).
+ */
+export const ENV_PREFIX = "PI_STOP_THINKING_";
+
+/** @internal Parse a boolean env value; `undefined` when missing or unrecognized. */
+function envBool(raw: string | undefined): boolean | undefined {
+  if (raw === undefined) return undefined;
+  switch (raw.trim().toLowerCase()) {
+    case "true": case "1": case "yes": case "on": return true;
+    case "false": case "0": case "no": case "off": return false;
+    default: return undefined;
+  }
+}
+
+/** @internal Parse a finite number; `undefined` when missing or non-finite. */
+function envNumber(raw: string | undefined): number | undefined {
+  if (raw === undefined || raw.trim() === "") return undefined;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+/** @internal Parse a comma-separated non-empty string list; `undefined` when missing/empty. */
+function envStringArray(raw: string | undefined): string[] | undefined {
+  if (raw === undefined || raw.trim() === "") return undefined;
+  const arr = raw.split(",").map((s) => s.trim()).filter((s) => s.length > 0);
+  return arr.length > 0 ? arr : undefined;
+}
+
+/**
+ * Load configuration from `PI_STOP_THINKING_*` environment variables, validating and filling
+ * defaults via {@link validateConfig}. This is the production entry point the extension
+ * factory calls; {@link loadConfig} remains a pure merge for tests.
+ *
+ * Accepts an optional `env` (defaults to `process.env`) so tests can inject a deterministic
+ * environment without mutating the global one. Parsed values are re-validated by
+ * {@link validateConfig}, so a loose parse can never yield an invalid {@link Config}.
+ *
+ * **Limitations** (see README → Configuration):
+ *  - Config is env-var only — Pi passes no extension settings, so `settings.json` cannot
+ *    configure this extension.
+ *  - `shortcut` is accepted as any non-empty string, but pi-tui can only MATCH certain
+ *    combos at runtime (reliably `ctrl+<letter a-z>`; symbol combos like `ctrl+.` register
+ *    but never fire in legacy terminals). The default `ctrl+q` is matchable.
+ *  - The shortcut must not collide with Pi's reserved keybindings or Pi will skip it.
+ *  - Invalid/unparseable values silently fall back to defaults (PRD Appendix K).
+ */
+export function loadConfigFromEnv(env: Record<string, string | undefined> = process.env): Config {
+  const partial: Record<string, unknown> = {};
+
+  const enabled = envBool(env[ENV_PREFIX + "ENABLED"]);
+  if (enabled !== undefined) partial.enabled = enabled;
+
+  const shortcut = env[ENV_PREFIX + "SHORTCUT"];
+  if (shortcut !== undefined && shortcut.length > 0) partial.shortcut = shortcut;
+
+  const providers = envStringArray(env[ENV_PREFIX + "PROVIDERS"]);
+  if (providers !== undefined) partial.supportedProviders = providers;
+
+  const transition = envNumber(env[ENV_PREFIX + "TRANSITION_TIMEOUT_MS"]);
+  if (transition !== undefined) partial.transitionTimeoutMs = transition;
+
+  const replacement = envNumber(env[ENV_PREFIX + "REPLACEMENT_TIMEOUT_MS"]);
+  if (replacement !== undefined) partial.replacementStartupTimeoutMs = replacement;
+
+  const maxBuf = envNumber(env[ENV_PREFIX + "MAX_REASONING_BUFFER_BYTES"]);
+  if (maxBuf !== undefined && Number.isInteger(maxBuf)) partial.maximumReasoningBufferBytes = maxBuf;
+
+  const telemetry = envBool(env[ENV_PREFIX + "TELEMETRY"]);
+  if (telemetry !== undefined) partial.telemetryEnabled = telemetry;
+
+  const diag = env[ENV_PREFIX + "DIAGNOSTICS"];
+  if (diag !== undefined && diag.length > 0) partial.diagnosticsLevel = diag;
+
+  return validateConfig({ ...DEFAULT_CONFIG, ...partial });
 }

@@ -1,9 +1,9 @@
 import { describe, test, expect } from "bun:test";
-import { DEFAULT_CONFIG, loadConfig, validateConfig } from "../src/config";
+import { DEFAULT_CONFIG, loadConfig, loadConfigFromEnv, validateConfig } from "../src/config";
 
 const FULL_DEFAULTS = {
   enabled: true,
-  shortcut: "ctrl+.",
+  shortcut: "ctrl+q",
   supportedProviders: ["zai"],
   transitionTimeoutMs: 5000,
   replacementStartupTimeoutMs: 10000,
@@ -48,7 +48,7 @@ describe("validateConfig — per-field fallback (strict types, no coercion)", ()
   test("shortcut", () => {
     expect(validateConfig({ shortcut: "escape" }).shortcut).toBe("escape"); // valid
     for (const bad of [123, true, null, "", undefined]) {
-      expect(validateConfig({ shortcut: bad }).shortcut).toBe("ctrl+."); // invalid -> default
+      expect(validateConfig({ shortcut: bad }).shortcut).toBe("ctrl+q"); // invalid -> default
     }
   });
   test("supportedProviders", () => {
@@ -116,6 +116,48 @@ describe("validateConfig — composition rules", () => {
   });
 });
 
+describe("loadConfigFromEnv — production loader (PI_STOP_THINKING_*)", () => {
+  const E = "PI_STOP_THINKING_";
+  test("empty env yields defaults", () => {
+    expect(loadConfigFromEnv({})).toEqual(FULL_DEFAULTS);
+  });
+  test("parses a shortcut override", () => {
+    expect(loadConfigFromEnv({ [E + "SHORTCUT"]: "ctrl+b" }).shortcut).toBe("ctrl+b");
+  });
+  test("parses booleans (true/false/1/0/yes/no)", () => {
+    expect(loadConfigFromEnv({ [E + "ENABLED"]: "false" }).enabled).toBe(false);
+    expect(loadConfigFromEnv({ [E + "ENABLED"]: "0" }).enabled).toBe(false);
+    expect(loadConfigFromEnv({ [E + "TELEMETRY"]: "yes" }).telemetryEnabled).toBe(true);
+  });
+  test("parses diagnostics level", () => {
+    expect(loadConfigFromEnv({ [E + "DIAGNOSTICS"]: "trace" }).diagnosticsLevel).toBe("trace");
+  });
+  test("parses comma-separated providers", () => {
+    expect(loadConfigFromEnv({ [E + "PROVIDERS"]: "zai, openai" }).supportedProviders)
+      .toEqual(["zai", "openai"]);
+  });
+  test("parses numeric timeouts", () => {
+    expect(loadConfigFromEnv({ [E + "TRANSITION_TIMEOUT_MS"]: "2500" }).transitionTimeoutMs).toBe(2500);
+  });
+  test("invalid values fall back to defaults (never throw, never break)", () => {
+    expect(loadConfigFromEnv({ [E + "ENABLED"]: "maybe" }).enabled).toBe(true); // default
+    expect(loadConfigFromEnv({ [E + "DIAGNOSTICS"]: "VERBOSE" }).diagnosticsLevel).toBe("error");
+    expect(loadConfigFromEnv({ [E + "TRANSITION_TIMEOUT_MS"]: "fast" }).transitionTimeoutMs).toBe(5000);
+    expect(loadConfigFromEnv({ [E + "PROVIDERS"]: ",," }).supportedProviders).toEqual(["zai"]);
+  });
+  test("does not read process.env when an explicit env is passed", () => {
+    // Ensures determinism: a stray process.env value must not leak in.
+    const orig = process.env[E + "SHORTCUT"];
+    process.env[E + "SHORTCUT"] = "ctrl+y";
+    try {
+      expect(loadConfigFromEnv({}).shortcut).toBe("ctrl+q"); // default, ignores process.env
+    } finally {
+      if (orig === undefined) delete process.env[E + "SHORTCUT"];
+      else process.env[E + "SHORTCUT"] = orig;
+    }
+  });
+});
+
 describe("loadConfig", () => {
   test("no argument returns full defaults (fresh object)", () => {
     const r = loadConfig();
@@ -133,7 +175,7 @@ describe("loadConfig", () => {
   test("still validates: an invalid typed value falls back to default", () => {
     // Partial<Config> is a compile-time guarantee only; runtime value is invalid.
     expect(loadConfig({ transitionTimeoutMs: -5 as unknown as number }).transitionTimeoutMs).toBe(5000);
-    expect(loadConfig({ shortcut: "" as unknown as string }).shortcut).toBe("ctrl+.");
+    expect(loadConfig({ shortcut: "" as unknown as string }).shortcut).toBe("ctrl+q");
   });
   test("returns a fresh object distinct from DEFAULT_CONFIG", () => {
     expect(loadConfig({ enabled: true })).not.toBe(DEFAULT_CONFIG);

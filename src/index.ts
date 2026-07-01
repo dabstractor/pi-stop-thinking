@@ -14,7 +14,7 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { loadConfig } from "./config";
+import { loadConfigFromEnv } from "./config";
 import type { Config } from "./config";
 import { createDiagnostics } from "./diagnostics";
 import type { Diagnostics } from "./diagnostics";
@@ -93,8 +93,9 @@ export default function stopThinkingExtension(
   let diagnostics: Diagnostics | undefined;
 
   try {
-    // (1) Configuration — pure; always valid.
-    const config = loadConfig();
+    // (1) Configuration — read from PI_STOP_THINKING_* env vars, validated; always valid.
+    //     Unset/invalid values fall back to defaults and never block delegation (PRD Appendix K).
+    const config = loadConfigFromEnv();
 
     // (2) Structured logger (PRD §36).
     diagnostics = createDiagnostics(config.diagnosticsLevel);

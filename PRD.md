@@ -501,7 +501,7 @@ Thinking...
 
 ↓
 
-Ctrl+.
+Ctrl+Q
 
 ↓
 
@@ -2370,27 +2370,29 @@ Testing requirements.
 
 # Part 7 — Configuration Specification
 
-Everything configurable.
+The extension is configurable at runtime. Because Pi's extension API does not pass a settings
+object to extensions, configuration is supplied via `PI_STOP_THINKING_*` environment
+variables (set in the shell or whatever launches `pi`). Every field is optional; an unset or
+invalid value falls back to that field's validated default and never prevents normal provider
+delegation (see Appendix K — Configuration Validation Rules).
 
-Shortcut.
+Configurable surface:
 
-Feature enable.
+* Shortcut (`PI_STOP_THINKING_SHORTCUT`).
+* Feature enable (`PI_STOP_THINKING_ENABLED`), also forceable off via the `--no-stop-thinking` CLI flag.
+* Provider allowlist (`PI_STOP_THINKING_PROVIDERS`, comma-separated).
+* Maximum reasoning buffer (`PI_STOP_THINKING_MAX_REASONING_BUFFER_BYTES`).
+* Transition timeout (`PI_STOP_THINKING_TRANSITION_TIMEOUT_MS`).
+* Replacement startup timeout (`PI_STOP_THINKING_REPLACEMENT_TIMEOUT_MS`).
+* Debug logging level (`PI_STOP_THINKING_DIAGNOSTICS`).
+* Anonymous telemetry (`PI_STOP_THINKING_TELEMETRY`).
 
-Reasoning detection thresholds.
-
-Debug logging.
-
-Developer mode.
-
-Experimental flags.
-
-Provider allowlist.
-
-Maximum reasoning buffer.
-
-Transition timeout.
-
-Retry policy.
+Shortcut constraints (terminal-matching limitation): Pi matches shortcuts against raw terminal
+input and reliably recognizes `Ctrl+<letter a–z>`, plus `Ctrl+[ \ ] _ -` and special keys. Symbol
+shortcuts such as `Ctrl+.` register but never fire in legacy terminals (the legacy `Ctrl+.` byte
+`0x1e` is unrecognized), so the default shortcut is `Ctrl+Q`. An overriding shortcut must be a
+matchable combo and must not collide with a reserved Pi keybinding (Pi skips conflicting
+shortcuts). Invalid values fall back to defaults.
 
 ---
 
@@ -4488,7 +4490,7 @@ The user has already reached the desired state.
 ```text
 text_start
 
-Ctrl+.
+Ctrl+Q
 ```
 
 Expected Behavior
@@ -4506,7 +4508,7 @@ Timeline
 ```text
 thinking_delta
 
-Ctrl+.
+Ctrl+Q
 
 Abort()
 
@@ -4536,11 +4538,11 @@ Violation constitutes an implementation defect.
 # EC-009 — Duplicate Shortcut
 
 ```text
-Ctrl+.
+Ctrl+Q
 
-Ctrl+.
+Ctrl+Q
 
-Ctrl+.
+Ctrl+Q
 ```
 
 Expected Behavior
@@ -4848,7 +4850,7 @@ thinking...
 
  |
 
-Ctrl+.
+Ctrl+Q
 
  |
 
@@ -5200,7 +5202,7 @@ No additional permissions shall be requested.
 ```yaml
 enabled: true
 
-shortcut: "Ctrl+."
+shortcut: "Ctrl+Q"
 
 supportedProviders:
   - zai
@@ -5232,6 +5234,17 @@ Invalid configuration shall:
 * Produce diagnostics
 * Fall back to defaults
 * Never prevent normal provider delegation
+
+## Configuration Source & Limitations
+
+* **Source:** environment variables only (`PI_STOP_THINKING_*`). Pi exposes no extension
+  settings object, so `settings.json` cannot configure this extension.
+* **Shortcut matching:** a shortcut is accepted as any non-empty KeyId, but Pi can only MATCH
+  certain combos against real terminal input — reliably `Ctrl+<letter a–z>` (plus `Ctrl+[ \ ] _ -`
+  and special keys). The default is `Ctrl+Q`; symbol shortcuts like `Ctrl+.` are accepted but
+  never fire in legacy terminals.
+* **Reserved keys:** a shortcut that collides with a built-in Pi keybinding is skipped by Pi.
+* **Safety:** invalid or unparseable values silently fall back to the default for that field.
 
 ---
 

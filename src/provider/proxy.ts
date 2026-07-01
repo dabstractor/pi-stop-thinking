@@ -210,7 +210,8 @@ export class StreamProxy {
   /**
    * Optional session-scoped {@link TransitionCoordinator} whose active-proxy reference this proxy clears on
    * cleanup (PRD §44 "Transition token"). `undefined` in production until the decorator wiring passes the
-   * session coordinator in; T3's cleanup path calls `this._coordinator?.setActiveProxy(undefined)` so the
+   * session coordinator in; T3's cleanup path calls `this._coordinator?.clearActiveProxy(this)` (guarded — Issue 3)
+   *   so the
    * no-coordinator case is a safe no-op. The proxy does NOT call `setActiveProxy(this)` on construct — that
    * is the decorator's responsibility.
    */
@@ -445,7 +446,9 @@ export class StreamProxy {
    *
    * Resource release (PRD §44): clear both timers, reset the reasoning buffer (wrapped in try/catch — §17
    * "cleanup must succeed even if telemetry fails"), release the replacement abort-controller reference,
-   * and clear the coordinator's active-proxy reference.
+   * and conditionally clear the coordinator's active-proxy reference (Issue 3 overlap guard — only
+   * clears if THIS proxy is the active one, so overlapping concurrent streams retain shortcut coverage;
+   * PRD INV-004).
    *
    * PRIVACY (Appendix H): the `proxy.lifecycle.cleanup` trace logs `{}` only — never content/reasoning.
    *
@@ -484,7 +487,7 @@ export class StreamProxy {
       }
     }
     this._replacementAbort = undefined;          // release the replacement abort-controller reference (§44)
-    this._coordinator?.setActiveProxy(undefined); // release the transition token / coordinator handle (§44)
+    this._coordinator?.clearActiveProxy(this);     // conditional clear (Issue 3 overlap guard) — only clears if THIS proxy is the active one
     this.diagnostics.trace("proxy.lifecycle.cleanup", {}); // privacy-safe — {} only
   }
 

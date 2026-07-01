@@ -274,6 +274,76 @@ describe("TransitionCoordinator — EC-001/Idle ignore (not Delegating)", () => 
   });
 });
 
+describe("TransitionCoordinator — overlap guard: clearActiveProxy only clears the active one (Issue 3)", () => {
+  test("clearActiveProxy(A) after B overwrote A is a no-op: B keeps coverage", () => {
+    const { diag } = makeCaptureDiag();
+    const c = new TransitionCoordinator(diag);
+    const { proxy: a } = makeFakeProxy();
+    const { proxy: b, triggerStopCalls } = makeFakeProxy({ canInterrupt: true });
+
+    c.setActiveProxy(a);
+    c.setActiveProxy(b); // B overwrites A
+    c.clearActiveProxy(a); // A's _terminate — should be no-op
+
+    expect(c.requestStop()).toBe(true); // B is still active
+    expect(triggerStopCalls.value).toBe(1);
+  });
+
+  test("clearActiveProxy(B) when B IS active clears coverage", () => {
+    const { diag, events } = makeCaptureDiag();
+    const c = new TransitionCoordinator(diag);
+    const { proxy: b } = makeFakeProxy({ canInterrupt: true });
+
+    c.setActiveProxy(b);
+    c.clearActiveProxy(b); // B's _terminate — should clear
+
+    expect(c.requestStop()).toBe(false); // no active proxy
+    const stop = events.find((e) => e.event === "coordinator.request-stop");
+    expect(stop).toBeDefined();
+    expect((stop!.fields as Record<string, unknown>)?.reason).toBe("no-active-proxy");
+  });
+
+  test("clearActiveProxy is a no-op when there is no active proxy", () => {
+    const { diag } = makeCaptureDiag();
+    const c = new TransitionCoordinator(diag);
+    const { proxy: a } = makeFakeProxy();
+
+    c.clearActiveProxy(a); // nothing was set — no-op
+    expect(c.requestStop()).toBe(false); // no active proxy
+  });
+
+  test("clearActiveProxy resets pendingStop ONLY when it actually clears", () => {
+    const { diag } = makeCaptureDiag();
+    const c = new TransitionCoordinator(diag);
+    const { proxy: a } = makeFakeProxy();
+    const { proxy: b } = makeFakeProxy({ canInterrupt: false, delegating: true });
+
+    c.setActiveProxy(b);
+    c.requestStop(); // records pendingStop on B
+
+    c.clearActiveProxy(a); // A not active → no-op → pendingStop survives
+    expect(c.consumePendingStop()).toBe(true);
+
+    c.requestStop(); // re-record pendingStop
+    c.clearActiveProxy(b); // B IS active → clears + resets pendingStop
+    expect(c.consumePendingStop()).toBe(false);
+  });
+
+  test("trace 'coordinator.clear-active' fires ONLY on an actual clear", () => {
+    const { diag, events } = makeCaptureDiag();
+    const c = new TransitionCoordinator(diag);
+    const { proxy: a } = makeFakeProxy();
+    const { proxy: b } = makeFakeProxy({ canInterrupt: true });
+
+    c.setActiveProxy(b);   // traces 'coordinator.set-active', NOT clear-active
+    c.clearActiveProxy(a); // no-op → no clear-active trace
+    expect(events.filter((e) => e.event === "coordinator.clear-active").length).toBe(0);
+
+    c.clearActiveProxy(b); // actual clear → one clear-active trace
+    expect(events.filter((e) => e.event === "coordinator.clear-active").length).toBe(1);
+  });
+});
+
 describe("TransitionCoordinator — privacy guard (PRD Appendix H)", () => {
   test("every captured fields object contains ONLY allow-listed keys", () => {
     const { diag, events } = makeCaptureDiag();

@@ -222,21 +222,21 @@
           "type": "Milestone",
           "id": "P1.M4",
           "title": "Issue 3 — Coordinator Overlap Guard (Minor)",
-          "status": "Planned",
+          "status": "Complete",
           "description": "Fix the MINOR defect: StreamProxy._terminate() unconditionally clears the coordinator's active proxy, so if two eligible streams overlap and the non-active one terminates, it disables the shortcut for the still-active stream. The fix adds a guarded clearActiveProxy(proxy) method to TransitionCoordinator that only clears when the terminating proxy IS the currently-active one.",
           "tasks": [
             {
               "type": "Task",
               "id": "P1.M4.T1",
               "title": "Add guarded clearActiveProxy to coordinator and use it in proxy cleanup",
-              "status": "Planned",
+              "status": "Complete",
               "description": "Add TransitionCoordinator.clearActiveProxy(proxy) that clears activeProxy only if it matches the given proxy, and replace the unconditional setActiveProxy(undefined) in StreamProxy._terminate() with a call to clearActiveProxy(this). Add an overlapping-proxy test.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M4.T1.S1",
                   "title": "Add clearActiveProxy(proxy) guard to coordinator, wire into _terminate, add overlap test",
-                  "status": "Planned",
+                  "status": "Complete",
                   "story_points": 2,
                   "dependencies": [
                     "P1.M3.T2.S1"

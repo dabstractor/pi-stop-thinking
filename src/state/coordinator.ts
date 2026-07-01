@@ -93,6 +93,28 @@ export class TransitionCoordinator {
   }
 
   /**
+   * Clear the active-proxy reference ONLY IF the requesting proxy IS the currently-active one
+   * (P1.M4.T1.S1 — Issue 3 overlap guard; PRD INV-004 / §37). Prevents a superseded stream's
+   * `_terminate()` from disabling shortcut coverage for a still-active concurrent stream that
+   * overwrote it via a later `setActiveProxy`.
+   *
+   * - MATCH (`this.activeProxy === proxy`): clears the slot to `undefined` AND resets `pendingStop`
+   *   (mirroring `setActiveProxy(undefined)`), then traces `coordinator.clear-active`.
+   * - MISS: a PURE no-op — no field mutation, no trace — so the still-active stream retains its
+   *   coverage and its own pending stop.
+   *
+   * @param proxy the proxy requesting the clear (the terminating stream). `StreamProxy` is
+   *              structurally assignable to `ActiveProxy`, so `_terminate()` passes `this`.
+   */
+  clearActiveProxy(proxy: ActiveProxy): void {
+    if (this.activeProxy === proxy) {
+      this.activeProxy = undefined;
+      this.pendingStop = false;
+      this.diagnostics.trace("coordinator.clear-active", {});
+    }
+  }
+
+  /**
    * EC-002: read + clear the pending-stop flag. Called by the proxy when the first reasoning event
    * arrives (Delegating→Reasoning). Returns whether a pending stop was recorded for this response.
    */

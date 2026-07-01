@@ -158,14 +158,14 @@
               "type": "Task",
               "id": "P1.M2.T1",
               "title": "Shared Type Definitions for Events and State",
-              "status": "Ready",
+              "status": "Complete",
               "description": "Define all TypeScript types used across modules: event classification helpers, transition states, and internal proxy interfaces.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M2.T1.S1",
                   "title": "Event classification and transition state types",
-                  "status": "Ready",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M1.T1.S1"

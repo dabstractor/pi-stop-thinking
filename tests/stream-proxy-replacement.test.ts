@@ -182,11 +182,11 @@ describe("StreamProxy — replacement launch (P1.M7.T1.S1)", () => {
     // Wait for replacement to be invoked (means we passed through Capturing + Restarting)
     await waitFor(() => mock.calls.length === 1, 500);
 
-    // Now push the first replacement event → triggers Splicing
+    // Now push the first replacement event → triggers Splicing (+ Answering via T3 beginAnswering)
     mock.pushReplacement(ev({ type: "text_start", contentIndex: 0 }));
 
-    // Wait for Splicing
-    await waitFor(() => controller.getState() === "Splicing", 500);
+    // Wait for Splicing→Answering (T3: beginAnswering fires on first text/toolcall in Splicing)
+    await waitFor(() => controller.getState() === "Answering", 500);
 
     // proxy.replacement.first-event trace confirms the splice transition
     expect(events.some((c) => c.event === "proxy.replacement.first-event")).toBe(true);
@@ -226,9 +226,9 @@ describe("StreamProxy — replacement launch (P1.M7.T1.S1)", () => {
     // Still forwarding until first replacement event
     expect(proxy.authority).toBe("forwarding");
 
-    // Push first replacement event → Splicing + authority flip
+    // Push first replacement event → Splicing + authority flip (+ Answering via T3 beginAnswering)
     mock.pushReplacement(ev({ type: "text_delta", contentIndex: 0, delta: "answer" }));
-    await waitFor(() => controller.getState() === "Splicing", 500);
+    await waitFor(() => controller.getState() === "Answering", 500);
 
     // Authority is now splicing (irreversible)
     expect(proxy.authority).toBe("splicing");
@@ -263,8 +263,8 @@ describe("StreamProxy — replacement launch (P1.M7.T1.S1)", () => {
     // Wait for replacement to be invoked
     await waitFor(() => mock.calls.length === 1, 500);
 
-    // Do NOT push any replacement events — let the timeout fire
-    await waitFor(() => controller.getState() === "Failed", 200);
+    // Do NOT push any replacement events — let the timeout fire (T3: _terminate moves Failed→Idle after catch)
+    await waitFor(() => events.some((c) => c.event === "proxy.replacement.startup-timeout"), 200);
 
     // proxy.replacement.startup-timeout must have been warned
     expect(events.some((c) => c.event === "proxy.replacement.startup-timeout")).toBe(true);
@@ -351,9 +351,9 @@ describe("StreamProxy — replacement launch (P1.M7.T1.S1)", () => {
     await waitFor(() => proxy.isReasoning());
     proxy.triggerStop();
 
-    // Wait for replacement invocation and timeout
+    // Wait for replacement invocation and timeout (T3: _terminate moves Failed→Idle after catch)
     await waitFor(() => mock.calls.length === 1, 500);
-    await waitFor(() => controller.getState() === "Failed", 200);
+    await waitFor(() => events.some((c) => c.event === "proxy.replacement.startup-timeout"), 200);
 
     // Filter replacement-related diagnostic events
     const replacementEvents = events.filter((c) => c.event.startsWith("proxy.replacement."));

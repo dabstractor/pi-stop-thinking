@@ -537,7 +537,7 @@
           "type": "Milestone",
           "id": "P1.M7",
           "title": "Phase 6 — Stream Splicing: Seamless Authority Transfer",
-          "status": "Researching",
+          "status": "Complete",
           "description": "Implement the complete stream splicing algorithm: after aborting the primary stream, launch the replacement stream, suppress primary terminal events, transfer authority to the replacement, and forward replacement events — all through the single downstream AssistantMessageEventStream.",
           "tasks": [
             {
@@ -603,14 +603,14 @@
               "type": "Task",
               "id": "P1.M7.T3",
               "title": "Full Transition Algorithm Integration",
-              "status": "Researching",
+              "status": "Complete",
               "description": "Integrate all components into the complete Stop Thinking lifecycle: from idle through reasoning → abort → replacement → splicing → answering → completion. Verify the full state machine cycle.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M7.T3.S1",
                   "title": "End-to-end transition lifecycle and cleanup",
-                  "status": "Researching",
+                  "status": "Complete",
                   "story_points": 2,
                   "dependencies": [
                     "P1.M7.T2.S1",
@@ -643,14 +643,14 @@
               "type": "Task",
               "id": "P1.M8.T1",
               "title": "Telemetry Module",
-              "status": "Planned",
+              "status": "Researching",
               "description": "Implement structured telemetry recording that captures transition metrics without affecting functionality. All telemetry failures are silently ignored.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M8.T1.S1",
                   "title": "Telemetry recorder with privacy-safe metrics",
-                  "status": "Planned",
+                  "status": "Researching",
                   "story_points": 2,
                   "dependencies": [
                     "P1.M7.T3.S1"

@@ -61,7 +61,8 @@ import type {
 import type { Diagnostics } from "../diagnostics";
 // Re-exported by P1.M2.T1.S1 (single local vocabulary); same type as the pi-ai symbol.
 import type { AssistantMessageEvent, TransitionState, ProxyPhase } from "../types";
-import { isTerminalEvent, isThinkingEvent } from "../types";
+import { isTerminalEvent, isThinkingEvent, isTextEvent, isToolCallEvent } from "../types";
+import type { TransitionCoordinator } from "../state/coordinator";
 import { RequestBuilder } from "../request/builder";
 // Reasoning detection collaborators (P1.M4.T2.S1: PRD §22 detection + §16 FSM + §13.4/§23 buffer).
 import { TransitionController, ALLOWED_TRANSITIONS } from "../state/controller";
@@ -168,6 +169,21 @@ export class StreamProxy {
   private _messageEndEmitted = false;
 
   /**
+   * Optional session-scoped {@link TransitionCoordinator} whose active-proxy reference this proxy clears on
+   * cleanup (PRD §44 "Transition token"). `undefined` in production until the decorator wiring passes the
+   * session coordinator in; T3's cleanup path calls `this._coordinator?.setActiveProxy(undefined)` so the
+   * no-coordinator case is a safe no-op. The proxy does NOT call `setActiveProxy(this)` on construct — that
+   * is the decorator's responsibility.
+   */
+  private readonly _coordinator?: TransitionCoordinator;
+
+  /**
+   * INV-010 (Appendix O): terminal handling (FSM→Idle + resource release) runs EXACTLY ONCE regardless of
+   * success, failure, timeout, or cancellation. Guarded by {@link _terminate}.
+   */
+  private _terminated = false;
+
+  /**
    * States in which a transition is IN FLIGHT (past `Reasoning`, not yet terminal). `isInterrupting()` is
    * `true` here (PRD §24.3 / INV-004) — used by the coordinator/ShortcutManager to discard repeat presses.
    */
@@ -207,6 +223,7 @@ export class StreamProxy {
     // NEW (P1.M7.T1.S1) — appended; production omits both:
     requestBuilder?: RequestBuilder,
     replacementStartupTimeoutMs: number = DEFAULT_CONFIG.replacementStartupTimeoutMs,
+    coordinator?: TransitionCoordinator, // P1.M7.T3.S1 — optional session coordinator
   ) {
     this.diagnostics = diagnostics;
     this._output = createAssistantMessageEventStream();
@@ -215,6 +232,7 @@ export class StreamProxy {
     this._abortTimeoutMs = abortTimeoutMs;
     this._requestBuilder = requestBuilder ?? new RequestBuilder(diagnostics);
     this._replacementStartupTimeoutMs = replacementStartupTimeoutMs;
+    this._coordinator = coordinator;
 
     // Propagate Pi's abort (user escape / ctrl+c) into the INTERNAL controller so the upstream still stops on
     // escape, while keeping a SEPARATE controller the extension can abort via triggerStop() without touching
@@ -344,6 +362,63 @@ export class StreamProxy {
       return true;
     }
     return false; // unreachable from current state → skip
+  }
+
+  /**
+   * The SINGLE terminal handler (PRD §51 Completion + §44 Resource Management + Appendix O INV-010/INV-011).
+   * Drives the FSM to `Idle` and releases every allocated per-request resource, EXACTLY ONCE (the
+   * {@link _terminated} guard makes every duplicate call a structural no-op).
+   *
+   * FSM drive (PRD §16), via the no-throw {@link transitionIfLegal}:
+   *   - success: `Splicing → Answering → Completed → Idle` (each step a no-op if already past it; on the
+   *     NORMAL non-interrupted path the FSM sits in `Reasoning`, which has no §16 exit, so ALL THREE are
+   *     no-ops → FSM correctly left in `Reasoning` with NO misleading `transition.failed`, yet resources
+   *     are still released).
+   *   - failure: `fail(reason)` (Any→Failed, skipped if already `Failed`) then `Failed → Idle`.
+   *
+   * Resource release (PRD §44): clear both timers, reset the reasoning buffer (wrapped in try/catch — §17
+   * "cleanup must succeed even if telemetry fails"), release the replacement abort-controller reference,
+   * and clear the coordinator's active-proxy reference.
+   *
+   * PRIVACY (Appendix H): the `proxy.lifecycle.cleanup` trace logs `{}` only — never content/reasoning.
+   *
+   * @param success `true` for a forwarded `done` terminal or a natural/race-won completion; `false` for
+   *                any error/throw/timeout.
+   * @param reason  an error CATEGORY (e.g. "replacement-error", "upstream-error") — never user content.
+   */
+  private _terminate(success: boolean, reason?: string): void {
+    if (this._terminated) return; // INV-010 — exactly once
+    this._terminated = true;
+
+    if (success) {
+      this.transitionIfLegal("Answering"); // Splicing→Answering (no-op if beginAnswering ran / no-op from Reasoning)
+      this.transitionIfLegal("Completed"); // Answering→Completed
+      this.transitionIfLegal("Idle");      // Completed→Idle
+    } else {
+      if (this._controller.getState() !== "Failed") {
+        this._controller.fail(reason ?? "transition-failed"); // Any→Failed (never throws)
+      }
+      this.transitionIfLegal("Idle"); // Failed→Idle
+    }
+
+    // Resource release (PRD §44) — order-independent; each is total.
+    this._clearAbortTimeout();         // release the FM-006 abort-timeout timer handle
+    this._clearReplacementTimeout();   // release the replacement-startup-timeout timer handle
+    // Buffer reset: only on the transition path (authority flipped to "splicing" — PRD §44 "Reasoning buffer").
+    // On the normal non-interrupted path, the buffer preserves captured reasoning for inspection.
+    if (this._authority === "splicing") {
+      try {
+        this._buffer.reset();             // destroy captured reasoning (PRD §44 "Reasoning buffer")
+      } catch (err) {
+        // §17 "Completed: cleanup must succeed even if telemetry fails" — never let a buffer fault escape.
+        this.diagnostics.warn("proxy.cleanup.buffer-reset-failed", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+    this._replacementAbort = undefined;          // release the replacement abort-controller reference (§44)
+    this._coordinator?.setActiveProxy(undefined); // release the transition token / coordinator handle (§44)
+    this.diagnostics.trace("proxy.lifecycle.cleanup", {}); // privacy-safe — {} only
   }
 
   /**
@@ -522,6 +597,8 @@ export class StreamProxy {
         this._cancelInFlightAbort();
         this.diagnostics.trace("proxy.abort.natural-completion-won", {});
       }
+      // P1.M7.T3.S1 — release resources on every natural completion (normal OR race-won)
+      this._terminate(true);
     } catch (err) {
       // FM-005 / EC-007 / RC-001 (P1.M5.T2.S1): if the upstream already emitted its terminal BEFORE the abort
       // error was thrown, NATURAL COMPLETION WINS. The terminal was already forwarded above; do NOT take the
@@ -532,6 +609,7 @@ export class StreamProxy {
           this._cancelInFlightAbort();
         }
         this.diagnostics.trace("proxy.abort.natural-completion-won", {});
+        this._terminate(true); // P1.M7.T3.S1 — release resources
         return; // the original terminal was already forwarded; output is complete
       }
       // EXPECTED ABORT (PRD §51 Abort Phase): triggerStop() set Aborting + aborted _internalAbort; the
@@ -570,6 +648,7 @@ export class StreamProxy {
         reason: "error",
         error: this.makeErrorAssistantMessage(model, message),
       });
+      this._terminate(false, "upstream-error"); // P1.M7.T3.S1 — fail→Idle + release resources (§17 reset before exit)
     }
   }
 
@@ -650,9 +729,38 @@ export class StreamProxy {
         // §18 filtering: replacement start suppressed (already emitted); thinking_* skipped; text_*/toolcall_*
         // forwarded; first terminal forwarded (+ completes output), duplicates discarded (FM-014/FM-015).
         this._emit(event);
+
+        // P1.M7.T3.S1 — completion FSM (PRD §16/§51), AFTER the forward (T2's flip-before-_emit ordering preserved).
+        // (1) First answer token → Splicing→Answering (streaming FSM accuracy; a no-op once past Splicing).
+        if (
+          this._controller.getState() === "Splicing" &&
+          (isTextEvent(event) || isToolCallEvent(event))
+        ) {
+          this._controller.beginAnswering(); // Splicing → Answering (PRD §16; legal here)
+        }
+        // (2) The forwarded terminal completes the transition. _emit forwards the FIRST terminal and dedups
+        //     the rest; _terminate is idempotent, so a duplicate/stray terminal is a safe no-op (INV-010).
+        if (isTerminalEvent(event)) {
+          if (event.type === "done") {
+            this._terminate(true); // Splicing/Answering → Completed → Idle + cleanup
+          } else {
+            // error terminal from the replacement → fail→Idle + cleanup (terminal already forwarded).
+            this._terminate(false, "replacement-error");
+          }
+        }
       }
-      // Replacement stream ended naturally (its terminal was forwarded → output completes). T3 owns the
-      // Splicing→Answering→Completed lifecycle; this subtask leaves the FSM in Splicing.
+      // P1.M7.T3.S1 — EC-018 (empty/clean-return-without-terminal): the replacement ended without emitting a
+      // terminal. output would hang; synthesize ONE error terminal so output.result() resolves (single-terminal
+      // invariant), then tear down. If a terminal WAS forwarded, _terminate already ran inside the loop and the
+      // _terminated guard makes this a no-op.
+      if (!this._messageEndEmitted) {
+        this._emit({
+          type: "error",
+          reason: "error",
+          error: this.makeErrorAssistantMessage(model, "replacement stream ended without a terminal"),
+        });
+        this._terminate(false, "replacement-empty");
+      }
     } catch (err) {
       // Replacement threw (startup-timeout abort, provider error, or an upstream throw). Synthesize ONE
       // error terminal so output.result() never hangs (single-terminal invariant), unless one was already
@@ -673,6 +781,7 @@ export class StreamProxy {
         reason: "error",
         error: this.makeErrorAssistantMessage(model, message),
       });
+      this._terminate(false, "replacement-failed"); // P1.M7.T3.S1 — fail→Idle (skipped if already Failed) + cleanup
     }
   }
 

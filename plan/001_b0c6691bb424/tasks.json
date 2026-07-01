@@ -11,7 +11,7 @@
           "type": "Milestone",
           "id": "P1.M1",
           "title": "Phase 0 — Foundation: Observationally-Equivalent Provider Decorator",
-          "status": "Planned",
+          "status": "Ready",
           "description": "Create the extension skeleton, configuration, diagnostics, and provider capture/delegation infrastructure that performs ZERO behavioral changes. All requests must behave identically with the extension installed.",
           "tasks": [
             {
@@ -90,14 +90,14 @@
               "type": "Task",
               "id": "P1.M1.T4",
               "title": "Provider Decorator: Capture and Transparent Delegation",
-              "status": "Researching",
+              "status": "Complete",
               "description": "Implement the ProviderDecorator that captures the built-in openai-completions provider via getApiProvider(), creates a wrapper streamSimple that delegates transparently, and registers the wrapper via registerApiProvider(). This must produce zero behavioral changes.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M1.T4.S1",
                   "title": "Provider capture and wrapper registration",
-                  "status": "Researching",
+                  "status": "Complete",
                   "story_points": 2,
                   "dependencies": [
                     "P1.M1.T2.S1",
@@ -122,14 +122,14 @@
               "type": "Task",
               "id": "P1.M1.T5",
               "title": "Extension Factory Entry Point",
-              "status": "Planned",
+              "status": "Ready",
               "description": "Wire everything together in the default export factory function that Pi calls on extension load.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M1.T5.S1",
                   "title": "index.ts factory wiring initialization and shutdown",
-                  "status": "Planned",
+                  "status": "Ready",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M1.T2.S1",

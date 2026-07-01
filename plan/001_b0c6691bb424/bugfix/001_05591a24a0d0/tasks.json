@@ -162,7 +162,7 @@
           "type": "Milestone",
           "id": "P1.M3",
           "title": "Issue 2 — Shortcut Disablement After Reasoning Ends (Major)",
-          "status": "Planned",
+          "status": "Complete",
           "description": "Fix the MAJOR defect: the FSM has no normal exit from Reasoning, so the controller stays in Reasoning for the entire answer phase, keeping canInterrupt() true. Pressing the shortcut during answer generation aborts the in-progress answer and launches a fresh replacement. The fix uses a minimal reasoningEnded flag (set on thinking_end / first answer token per PRD §22.4) to gate canInterrupt() and triggerStop(), disabling the shortcut the moment reasoning ends. This also prevents compounding Issue 1 (re-aborting the answer).",
           "tasks": [
             {
@@ -194,14 +194,14 @@
               "type": "Task",
               "id": "P1.M3.T2",
               "title": "EC-005 / EC-006 end-to-end tests (shortcut disabled after reasoning)",
-              "status": "Planned",
+              "status": "Complete",
               "description": "Add the end-to-end coverage the PRD testing summary identifies as missing: assert the shortcut is disabled once the answer phase begins. Covers EC-005 (press after thinking_end) and EC-006 (press on first answer token), asserting triggerStop()/requestStop() return false with no abort and no replacement call.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M3.T2.S1",
                   "title": "Add EC-005 and EC-006 end-to-end tests asserting shortcut returns false and no abort/replacement occurs",
-                  "status": "Planned",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M3.T1.S1"

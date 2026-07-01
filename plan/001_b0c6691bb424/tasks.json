@@ -4,7 +4,7 @@
       "type": "Phase",
       "id": "P1",
       "title": "Stop Thinking & Do — Production MVP",
-      "status": "Ready",
+      "status": "Complete",
       "description": "Build a Pi extension that intercepts z.ai reasoning streams at the streamSimple provider boundary, allowing users to press a keyboard shortcut to abort reasoning and immediately transition to answer generation with thinking disabled — while Pi observes a single uninterrupted AssistantMessageEventStream. The extension decorates (does not replace) Pi's built-in openai-completions provider and activates only for z.ai reasoning models.",
       "milestones": [
         {
@@ -636,7 +636,7 @@
           "type": "Milestone",
           "id": "P1.M8",
           "title": "Phase 7 — Hardening: Telemetry, Failure Modes, Stress Testing, Documentation",
-          "status": "Ready",
+          "status": "Complete",
           "description": "Add production hardening: telemetry metrics, comprehensive failure mode handling (FM-001 through FM-015), edge case coverage (EC-001 through EC-020), stress/chaos testing, performance optimization, and final documentation.",
           "tasks": [
             {
@@ -789,14 +789,14 @@
               "type": "Task",
               "id": "P1.M8.T5",
               "title": "Sync Changeset-Level Documentation",
-              "status": "Ready",
+              "status": "Complete",
               "description": "Final documentation task: update README.md with feature overview, installation, configuration, and usage. Create CHANGELOG. Ensure all cross-cutting docs reflect the complete changeset.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M8.T5.S1",
                   "title": "README.md with full feature documentation",
-                  "status": "Ready",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M8.T4.S1",

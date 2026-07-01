@@ -11,7 +11,7 @@
           "type": "Milestone",
           "id": "P1.M1",
           "title": "Phase 0 — Foundation: Observationally-Equivalent Provider Decorator",
-          "status": "Ready",
+          "status": "Complete",
           "description": "Create the extension skeleton, configuration, diagnostics, and provider capture/delegation infrastructure that performs ZERO behavioral changes. All requests must behave identically with the extension installed.",
           "tasks": [
             {
@@ -122,14 +122,14 @@
               "type": "Task",
               "id": "P1.M1.T5",
               "title": "Extension Factory Entry Point",
-              "status": "Ready",
+              "status": "Complete",
               "description": "Wire everything together in the default export factory function that Pi calls on extension load.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M1.T5.S1",
                   "title": "index.ts factory wiring initialization and shutdown",
-                  "status": "Ready",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M1.T2.S1",
@@ -158,14 +158,14 @@
               "type": "Task",
               "id": "P1.M2.T1",
               "title": "Shared Type Definitions for Events and State",
-              "status": "Planned",
+              "status": "Ready",
               "description": "Define all TypeScript types used across modules: event classification helpers, transition states, and internal proxy interfaces.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M2.T1.S1",
                   "title": "Event classification and transition state types",
-                  "status": "Planned",
+                  "status": "Ready",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M1.T1.S1"
@@ -185,14 +185,14 @@
               "type": "Task",
               "id": "P1.M2.T2",
               "title": "StreamProxy: Transparent Event Forwarding",
-              "status": "Planned",
+              "status": "Researching",
               "description": "Implement the StreamProxy that creates a downstream AssistantMessageEventStream, iterates the upstream provider stream, and forwards every event unchanged. No interception logic yet — purely pass-through.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M2.T2.S1",
                   "title": "StreamProxy class with forward-only pipeline",
-                  "status": "Planned",
+                  "status": "Researching",
                   "story_points": 2,
                   "dependencies": [
                     "P1.M2.T1.S1",

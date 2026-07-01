@@ -313,14 +313,14 @@
               "type": "Task",
               "id": "P1.M4.T1",
               "title": "ReasoningBuffer Module",
-              "status": "Researching",
+              "status": "Complete",
               "description": "Append-only buffer that captures reasoning events before interruption, tracks ordering and offsets, and exposes an immutable snapshot after freeze.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M4.T1.S1",
                   "title": "ReasoningBuffer append-only collection with freeze/snapshot",
-                  "status": "Researching",
+                  "status": "Complete",
                   "story_points": 2,
                   "dependencies": [
                     "P1.M2.T1.S1",
@@ -341,14 +341,14 @@
               "type": "Task",
               "id": "P1.M4.T2",
               "title": "Reasoning Detection Logic in StreamProxy",
-              "status": "Planned",
+              "status": "Researching",
               "description": "Add reasoning state tracking to the StreamProxy event loop: detect thinking_start/thinking_delta/thinking_end/text_start, drive the TransitionController state, and populate the ReasoningBuffer.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M4.T2.S1",
                   "title": "StreamProxy reasoning event tracking and state transitions",
-                  "status": "Planned",
+                  "status": "Researching",
                   "story_points": 2,
                   "dependencies": [
                     "P1.M2.T2.S1",

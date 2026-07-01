@@ -11,14 +11,14 @@
           "type": "Milestone",
           "id": "P1.M1",
           "title": "Consumer-Simulation Harness & Realistic Mocks",
-          "status": "Planned",
+          "status": "Complete",
           "description": "Build the test infrastructure that the existing suite lacks: a faithful copy of the pi-agent-core agent-loop consumer assembly logic (partialMessage = event.partial; finalMessage = stream.result()), plus a realistic two-call mock provider that carries real accumulating partial objects and contentIndex fields (mirroring the real openai-completions provider). This harness is what would have caught Issue 1. It is consumed by the Issue 1 integration test (M2) and is reusable for Issue 2 (M3) lifecycle assertions. Pure test infra — NO production source changes.",
           "tasks": [
             {
               "type": "Task",
               "id": "P1.M1.T1",
               "title": "Build consumer-simulation harness and realistic two-call mock provider",
-              "status": "Planned",
+              "status": "Complete",
               "description": "Create tests/helpers/consumer-harness.ts containing (a) a consumeLikeAgentLoop function that faithfully mirrors agent-loop.js message assembly, and (b) a realistic two-call mock provider whose primary and replacement calls each build a real accumulating output object with structured content blocks and proper contentIndex (exactly like openai-completions.js does). This is the foundational tooling for reproducing and verifying Issue 1.",
               "subtasks": [
                 {
@@ -39,7 +39,7 @@
                   "type": "Subtask",
                   "id": "P1.M1.T1.S2",
                   "title": "Create realistic two-call mock provider with accumulating partial objects and contentIndex",
-                  "status": "Planned",
+                  "status": "Complete",
                   "story_points": 2,
                   "dependencies": [
                     "P1.M1.T1.S1"

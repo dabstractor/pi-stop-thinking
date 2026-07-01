@@ -60,8 +60,9 @@ import type {
 } from "@earendil-works/pi-ai";
 import type { Diagnostics } from "../diagnostics";
 // Re-exported by P1.M2.T1.S1 (single local vocabulary); same type as the pi-ai symbol.
-import type { AssistantMessageEvent, TransitionState } from "../types";
+import type { AssistantMessageEvent, TransitionState, ProxyPhase } from "../types";
 import { isTerminalEvent } from "../types";
+import { RequestBuilder } from "../request/builder";
 // Reasoning detection collaborators (P1.M4.T2.S1: PRD §22 detection + §16 FSM + §13.4/§23 buffer).
 import { TransitionController, ALLOWED_TRANSITIONS } from "../state/controller";
 import { ReasoningBuffer } from "../buffer";
@@ -104,6 +105,38 @@ export class StreamProxy {
   /** Hard ceiling (ms) for the upstream to close after abort before the transition fails (PRD §43). Defaults
    *  to `DEFAULT_CONFIG.transitionTimeoutMs`; tests inject a small value to exercise FM-006 quickly. */
   private readonly _abortTimeoutMs: number;
+
+  /**
+   * Per-request RequestBuilder (PRD §31) — produces the thinking-disabled replacement triple (PRD §53).
+   * Optional DI; production omits and the proxy self-creates `new RequestBuilder(diagnostics)`.
+   */
+  private readonly _requestBuilder: RequestBuilder;
+
+  /**
+   * Hard ceiling (ms) waiting for the replacement stream's FIRST event before the transition fails
+   * (PRD §43 "Replacement startup timeout — Configurable"). Defaults to
+   * `DEFAULT_CONFIG.replacementStartupTimeoutMs` (10000); tests inject a small value to fail fast.
+   */
+  private readonly _replacementStartupTimeoutMs: number;
+
+  /**
+   * Internal abort controller for the REPLACEMENT stream ONLY (PRD §51 Replacement Phase). FRESH per
+   * replacement — the primary's `_internalAbort` is ALREADY aborted (used by `triggerStop`), so it CANNOT
+   * be reused. Pi's external signal (`options.signal`) is fan-in'd into this so `ctrl+c` still aborts the
+   * replacement. `undefined` until `_launchReplacement` creates it.
+   */
+  private _replacementAbort: AbortController | undefined;
+
+  /** Pending replacement-startup-timeout timer (PRD §43). Armed by `_launchReplacement` before iterating;
+   *  cleared on the first replacement event (clean) or when it fires (→ `Failed`). `undefined` when idle. */
+  private _replacementStartupTimer: ReturnType<typeof setTimeout> | undefined;
+
+  /**
+   * The StreamProxy's event-authority phase (PRD §18 / §20.6 / §21). `"forwarding"` while the primary is
+   * authoritative; flips to `"splicing"` when the first replacement event is accepted (authority transfer —
+   * irreversible per PRD §39/§51). Read by P1.M7.T2/T3.
+   */
+  private _authority: ProxyPhase = "forwarding";
 
   /**
    * FM-005 / EC-007 / RC-001 (P1.M5.T2.S1): set `true` the moment the upstream emits its OWN terminal
@@ -151,12 +184,17 @@ export class StreamProxy {
     controller?: TransitionController,
     buffer?: ReasoningBuffer,
     abortTimeoutMs: number = DEFAULT_CONFIG.transitionTimeoutMs,
+    // NEW (P1.M7.T1.S1) — appended; production omits both:
+    requestBuilder?: RequestBuilder,
+    replacementStartupTimeoutMs: number = DEFAULT_CONFIG.replacementStartupTimeoutMs,
   ) {
     this.diagnostics = diagnostics;
     this._output = createAssistantMessageEventStream();
     this._controller = controller ?? new TransitionController(diagnostics);
     this._buffer = buffer ?? new ReasoningBuffer(diagnostics, DEFAULT_CONFIG.maximumReasoningBufferBytes);
     this._abortTimeoutMs = abortTimeoutMs;
+    this._requestBuilder = requestBuilder ?? new RequestBuilder(diagnostics);
+    this._replacementStartupTimeoutMs = replacementStartupTimeoutMs;
 
     // Propagate Pi's abort (user escape / ctrl+c) into the INTERNAL controller so the upstream still stops on
     // escape, while keeping a SEPARATE controller the extension can abort via triggerStop() without touching
@@ -188,6 +226,15 @@ export class StreamProxy {
   /** The per-request reasoning capture (PRD §13.4/§23). Forward-compat: P1.M5 (freeze) / P1.M6 (snapshot). */
   get buffer(): ReasoningBuffer {
     return this._buffer;
+  }
+
+  /**
+   * The StreamProxy's event-authority phase (PRD §18 / §20.6 / §21). `"forwarding"` until the first
+   * replacement event is accepted; `"splicing"` thereafter (replacement authoritative). Read by P1.M7.T2/T3
+   * to decide which stream's events to forward.
+   */
+  get authority(): ProxyPhase {
+    return this._authority;
   }
 
   /** Whether reasoning is currently flowing (PRD §22.5). P1.M4.T4's coordinator delegates to this. */
@@ -411,7 +458,10 @@ export class StreamProxy {
         }
         this._buffer.freeze(); // (PRD §41: reasoning immutable once frozen; §40: replacement needs this)
         this.diagnostics.trace("proxy.abort.completed", {});
-        return; // leave output OPEN — replacement stream (P1.M6/P1.M7) owns the terminal
+        // PRD §40: primary aborted + reasoning frozen → launch the thinking-disabled replacement and drive the
+        // FSM through Restarting → Splicing (PRD §16/§51). output stays OPEN; the replacement owns the terminal.
+        await this._launchReplacement(model, context, options, upstreamStreamFn);
+        return;
       }
       // UNEXPECTED throw (network/provider error, or an abort-timeout-then-throw) → synthesize ONE terminal
       // so output.result() never hangs (single-terminal/single-result invariant). (Existing behavior.)
@@ -436,6 +486,129 @@ export class StreamProxy {
    * event when `run` catches a thrown upstream. Content/usage are zeroed; stopReason is `"error"`;
    * `errorMessage` carries the thrown message. Only used on the defensive path (never in normal flow).
    */
+  /**
+   * Launch the thinking-disabled replacement stream and drive the FSM through Restarting → Splicing
+   * (PRD §16 / §40 / §51 Replacement Phase + Authority Transfer). Invoked from `run()`'s clean-abort branch
+   * AFTER `completeAbort()` + `freeze()` (state is `Capturing`).
+   *
+   * Steps (work-item contract): (a) build the replacement triple via RequestBuilder; (b) `beginReplacement()`
+   * → `Restarting`; (c) create a FRESH `_replacementAbort` + fan-in Pi's external signal; (d) invoke the SAME
+   * captured provider `streamSimple` with `{ ...triple.options, signal }` (reasoning === undefined disables
+   * z.ai thinking); arm the startup timeout; (e) iterate; (f) on the FIRST event → `beginSplice()` →
+   * `Splicing` + clear the timeout; (g) flip authority to `"splicing"` (irreversible — PRD §39/§51).
+   *
+   * BASELINE FORWARDING: replacement events are pushed into `output` unchanged. The primary pushed NO
+   * terminal (output left open by the abort path), so the replacement's events are the single forward path
+   * and its `done` becomes the single terminal (single-start/single-terminal/single-result invariants hold).
+   * P1.M7.T2 adds the filtering/suppression RULES (EC-017 stray reasoning, primary-terminal suppression);
+   * P1.M7.T3 adds the full Splicing→Answering→Completed lifecycle. Replacement events do NOT run
+   * `trackEvent` (the buffer is FROZEN and replacement processing is T2/T3's job).
+   *
+   * SAFETY NET: if the replacement throws (startup-timeout abort, provider error) and no terminal was
+   * forwarded, exactly ONE synthesized `error` terminal is pushed so `output.result()` never hangs (push is
+   * idempotent once complete → transparent in the normal path).
+   *
+   * @returns never rejects (the catch converts any error into a terminal event or logs + swallows).
+   */
+  private async _launchReplacement(
+    model: Model<Api>,
+    context: Context,
+    options: SimpleStreamOptions,
+    originalStreamFn: ApiStreamSimpleFunction,
+  ): Promise<void> {
+    try {
+      // (a) Build the thinking-disabled replacement triple (PRD §25/§31/§53). `options` is the ORIGINAL
+      //     request options (reasoning level intact); buildReplacement spreads + forces reasoning: undefined.
+      const triple = this._requestBuilder.buildReplacement(model, context, options, this._buffer.snapshot());
+
+      // (b) Capturing → Restarting (PRD §16). Legal: we are in Capturing (just completeAbort()'d).
+      this._controller.beginReplacement();
+
+      // (c) FRESH abort controller for the replacement (the primary's _internalAbort is ALREADY aborted).
+      this._replacementAbort = new AbortController();
+      // Fan-in Pi's external signal so ctrl+c still aborts the replacement (mirrors the ctor fan-in).
+      const external = options?.signal;
+      if (external) {
+        if (external.aborted) this._replacementAbort.abort();
+        else external.addEventListener("abort", () => this._replacementAbort!.abort(), { once: true });
+      }
+
+      // (d) Invoke the SAME captured provider streamSimple (PRD §51). triple.options.reasoning === undefined
+      //     disables z.ai thinking; we inject the replacement signal (preserving every other option field).
+      const replacementStream = originalStreamFn(triple.model, triple.context, {
+        ...triple.options,
+        signal: this._replacementAbort.signal,
+      });
+
+      // (h) Arm the replacement-startup timeout (PRD §43). Cleared on the first accepted event.
+      this._startReplacementTimeout();
+
+      let firstSeen = false;
+      // (e) Begin iterating the replacement stream.
+      for await (const event of replacementStream) {
+        if (!firstSeen) {
+          firstSeen = true;
+          this._clearReplacementTimeout(); // first replacement event accepted → cancel the startup timeout
+          // (f) Restarting → Splicing (PRD §16). Legal: we are in Restarting (just beginReplacement()'d).
+          this._controller.beginSplice();
+          // (g) Authority transfer — irreversible (PRD §39/§51). "splicing" == replacement authoritative.
+          this._authority = "splicing";
+          this.diagnostics.trace("proxy.replacement.first-event", {}); // privacy-safe — {} only (Appendix H)
+        }
+        // BASELINE forward (T2 refines filtering; T3 owns completion). The primary pushed no terminal, so the
+        // replacement's done is the single terminal (push completes output). `push` is idempotent if complete.
+        this._output.push(event);
+      }
+      // Replacement stream ended naturally (its terminal was forwarded → output completes). T3 owns the
+      // Splicing→Answering→Completed lifecycle; this subtask leaves the FSM in Splicing.
+    } catch (err) {
+      // Replacement threw (startup-timeout abort, provider error, or an upstream throw). Synthesize ONE
+      // error terminal so output.result() never hangs (single-terminal invariant), unless one was already
+      // forwarded (push is idempotent once complete).
+      this._clearReplacementTimeout();
+      const message = err instanceof Error ? err.message : String(err);
+      // CLASSIFY (gotcha): the startup-timeout handler ALREADY moved us to Failed + aborted _replacementAbort
+      // (→ this throw) and logged `proxy.replacement.startup-timeout`. By the time the blocked iterator throws,
+      // getState() is "Failed" — so a `getState() === "Restarting"` check would be a DEAD branch and would
+      // DOUBLE-WARN. Therefore: SKIP the classify-warn on the timeout path (state already Failed); a throw
+      // while NOT yet Failed is a GENUINE replacement failure → classify + log it. Synthesize the terminal in
+      // BOTH cases so output.result() never hangs (single-terminal invariant).
+      if (this._controller.getState() !== "Failed") {
+        this.diagnostics.warn("proxy.replacement.failed", { error: message });
+      }
+      this._output.push({
+        type: "error",
+        reason: "error",
+        error: this.makeErrorAssistantMessage(model, message),
+      });
+    }
+  }
+
+  /**
+   * Arm the replacement-startup timeout (PRD §43). If the replacement emits NO first event within
+   * `_replacementStartupTimeoutMs`, fail the transition and abort the replacement (which unblocks the
+   * blocked iterator → `_launchReplacement`'s catch synthesizes a terminal). Mirrors `_startAbortTimeout`.
+   */
+  private _startReplacementTimeout(): void {
+    this._clearReplacementTimeout();
+    this._replacementStartupTimer = setTimeout(() => {
+      // Only act if we are STILL Restarting (a first event cleared this timer and moved us to Splicing).
+      if (this._controller.getState() === "Restarting") {
+        this.diagnostics.warn("proxy.replacement.startup-timeout", { timeoutMs: this._replacementStartupTimeoutMs });
+        this._controller.fail("replacement-startup-timeout"); // Restarting → Failed (Any→Failed; never throws)
+        this._replacementAbort?.abort(); // unblock the blocked iterator so the loop exits
+      }
+    }, this._replacementStartupTimeoutMs);
+  }
+
+  /** Cancel any pending replacement-startup timeout (first event accepted / throw / disposal). */
+  private _clearReplacementTimeout(): void {
+    if (this._replacementStartupTimer !== undefined) {
+      clearTimeout(this._replacementStartupTimer);
+      this._replacementStartupTimer = undefined;
+    }
+  }
+
   private makeErrorAssistantMessage(model: Model<Api>, message: string): AssistantMessage {
     return {
       role: "assistant",

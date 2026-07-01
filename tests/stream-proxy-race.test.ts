@@ -2,6 +2,7 @@ import { describe, test, expect } from "bun:test";
 import { StreamProxy } from "../src/provider/proxy";
 import { TransitionController } from "../src/state/controller";
 import { ReasoningBuffer } from "../src/buffer";
+import { DEFAULT_CONFIG } from "../src/config";
 import type {
   AssistantMessage,
   AssistantMessageEvent,
@@ -294,6 +295,9 @@ describe("StreamProxy — race detection (P1.M5.T2.S1)", () => {
       diag,
       controller,
       buffer,
+      DEFAULT_CONFIG.transitionTimeoutMs,
+      undefined, // requestBuilder
+      15, // replacementStartupTimeoutMs — small so orphaned replacement fails fast
     );
 
     // Drive to Reasoning
@@ -305,8 +309,9 @@ describe("StreamProxy — race detection (P1.M5.T2.S1)", () => {
     // Dispatch the abort — mock throws immediately (no terminal queued)
     expect(proxy.triggerStop()).toBe(true);
 
-    // Wait for clean abort → Capturing
-    await waitFor(() => controller.getState() === "Capturing");
+    // Wait for clean abort — use the stable proxy.abort.completed trace
+    // (FSM continues past Capturing → Restarting; waitFor(Capturing) can never observe it)
+    await waitFor(() => events.some((c) => c.event === "proxy.abort.completed"));
 
     // Buffer must be frozen (genuine clean abort)
     expect(() => buffer.append("no")).toThrow();

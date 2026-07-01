@@ -2,6 +2,7 @@ import { describe, test, expect } from "bun:test";
 import { StreamProxy } from "../src/provider/proxy";
 import { TransitionController } from "../src/state/controller";
 import { ReasoningBuffer } from "../src/buffer";
+import { DEFAULT_CONFIG } from "../src/config";
 import type {
   AssistantMessage,
   AssistantMessageEvent,
@@ -127,6 +128,9 @@ describe("StreamProxy — abort coordination (P1.M5.T1.S1)", () => {
       diag,
       controller,
       buffer,
+      DEFAULT_CONFIG.transitionTimeoutMs,
+      undefined, // requestBuilder
+      15, // replacementStartupTimeoutMs — small so orphaned replacement fails fast
     );
 
     // Drive events to reach Reasoning
@@ -139,8 +143,8 @@ describe("StreamProxy — abort coordination (P1.M5.T1.S1)", () => {
     expect(proxy.triggerStop()).toBe(true);
     expect(mock.isAborted()).toBe(true);
 
-    // Wait for run()'s catch to observe the abort → completeAbort → Capturing
-    await waitFor(() => controller.getState() === "Capturing");
+    // Wait for run()'s catch to observe the abort → completeAbort → freeze → proxy.abort.completed
+    await waitFor(() => events.some((c) => c.event === "proxy.abort.completed"));
 
     // Buffer must be frozen (append throws)
     expect(() => buffer.append("no")).toThrow();
@@ -168,6 +172,9 @@ describe("StreamProxy — abort coordination (P1.M5.T1.S1)", () => {
       diag,
       controller,
       buffer,
+      DEFAULT_CONFIG.transitionTimeoutMs,
+      undefined,
+      15, // replacementStartupTimeoutMs — small so orphaned replacement fails fast
     );
 
     // Before any event, controller is still Idle (the upstream hasn't yielded start yet, but even if it did,
@@ -178,7 +185,7 @@ describe("StreamProxy — abort coordination (P1.M5.T1.S1)", () => {
   });
 
   test("first-press-wins / isInterrupting: second triggerStop returns false", async () => {
-    const { diag } = makeCaptureDiag();
+    const { diag, events } = makeCaptureDiag();
     const controller = new TransitionController(diag);
     const buffer = new ReasoningBuffer(diag, 1_000_000);
     const mock = makeAbortableUpstream();
@@ -191,6 +198,9 @@ describe("StreamProxy — abort coordination (P1.M5.T1.S1)", () => {
       diag,
       controller,
       buffer,
+      DEFAULT_CONFIG.transitionTimeoutMs,
+      undefined,
+      15, // replacementStartupTimeoutMs — small so orphaned replacement fails fast
     );
 
     mock.push(ev({ type: "start" }));
@@ -207,8 +217,9 @@ describe("StreamProxy — abort coordination (P1.M5.T1.S1)", () => {
     // Second press fails (canInterrupt now false)
     expect(proxy.triggerStop()).toBe(false);
 
-    // Let the abort settle
-    await waitFor(() => controller.getState() === "Capturing");
+    // Let the abort settle — wait for the stable proxy.abort.completed trace
+    // (FSM continues past Capturing → Restarting; waitFor(Capturing) can never observe it)
+    await waitFor(() => events.some((c) => c.event === "proxy.abort.completed"));
   });
 
   test("canInterrupt()/isInterrupting() delegation", async () => {
@@ -225,6 +236,9 @@ describe("StreamProxy — abort coordination (P1.M5.T1.S1)", () => {
       diag,
       controller,
       buffer,
+      DEFAULT_CONFIG.transitionTimeoutMs,
+      undefined,
+      15, // replacementStartupTimeoutMs — small so orphaned replacement fails fast
     );
 
     // Idle: canInterrupt false, isInterrupting false
@@ -241,7 +255,7 @@ describe("StreamProxy — abort coordination (P1.M5.T1.S1)", () => {
     expect(proxy.isInterrupting()).toBe(false);
 
     proxy.triggerStop();
-    // Now Aborting (then Capturing): canInterrupt false, isInterrupting true
+    // Now Aborting (then Capturing/Restarting): canInterrupt false, isInterrupting true
     await waitFor(() => proxy.isInterrupting());
     expect(proxy.canInterrupt()).toBe(false);
   });
@@ -301,6 +315,9 @@ describe("StreamProxy — abort coordination (P1.M5.T1.S1)", () => {
       diag,
       controller,
       buffer,
+      DEFAULT_CONFIG.transitionTimeoutMs,
+      undefined,
+      15, // replacementStartupTimeoutMs — small so orphaned replacement fails fast
     );
 
     // Drive to Reasoning
@@ -331,6 +348,9 @@ describe("StreamProxy — abort coordination (P1.M5.T1.S1)", () => {
       diag,
       controller,
       buffer,
+      DEFAULT_CONFIG.transitionTimeoutMs,
+      undefined,
+      15, // replacementStartupTimeoutMs — small so orphaned replacement fails fast
     );
 
     // Drain consumer concurrently
@@ -381,6 +401,9 @@ describe("StreamProxy — abort coordination (P1.M5.T1.S1)", () => {
       diag,
       controller,
       buffer,
+      DEFAULT_CONFIG.transitionTimeoutMs,
+      undefined,
+      15, // replacementStartupTimeoutMs — small so orphaned replacement fails fast
     );
 
     mock.push(ev({ type: "start" }));
@@ -389,7 +412,8 @@ describe("StreamProxy — abort coordination (P1.M5.T1.S1)", () => {
     await waitFor(() => proxy.isReasoning());
 
     proxy.triggerStop();
-    await waitFor(() => controller.getState() === "Capturing");
+    // Wait for clean-abort trace (FSM continues past Capturing → Restarting)
+    await waitFor(() => events.some((c) => c.event === "proxy.abort.completed"));
 
     // Filter abort-related diagnostic events
     const abortEvents = events.filter((c) => c.event.startsWith("proxy.abort."));

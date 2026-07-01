@@ -61,6 +61,7 @@ import type {
 import type { Diagnostics } from "../diagnostics";
 // Re-exported by P1.M2.T1.S1 (single local vocabulary); same type as the pi-ai symbol.
 import type { AssistantMessageEvent, TransitionState } from "../types";
+import { isTerminalEvent } from "../types";
 // Reasoning detection collaborators (P1.M4.T2.S1: PRD §22 detection + §16 FSM + §13.4/§23 buffer).
 import { TransitionController, ALLOWED_TRANSITIONS } from "../state/controller";
 import { ReasoningBuffer } from "../buffer";
@@ -103,6 +104,15 @@ export class StreamProxy {
   /** Hard ceiling (ms) for the upstream to close after abort before the transition fails (PRD §43). Defaults
    *  to `DEFAULT_CONFIG.transitionTimeoutMs`; tests inject a small value to exercise FM-006 quickly. */
   private readonly _abortTimeoutMs: number;
+
+  /**
+   * FM-005 / EC-007 / RC-001 (P1.M5.T2.S1): set `true` the moment the upstream emits its OWN terminal
+   * (`done`/`error`) event AND it is forwarded into `output`. Lets `run()` distinguish a CLEAN abort
+   * (upstream threw on abort, no terminal yet → proceed to Capturing) from a race the UPSTREAM WON
+   * (it completed naturally despite/with an in-flight abort → natural completion wins; cancel the abort).
+   * Checked FIRST in the catch and in the natural-exit path. Set in `run()`'s loop right after `push`.
+   */
+  private _upstreamCompleted = false;
 
   /**
    * States in which a transition is IN FLIGHT (past `Reasoning`, not yet terminal). `isInterrupting()` is
@@ -229,6 +239,20 @@ export class StreamProxy {
     }, this._abortTimeoutMs);
   }
 
+  /**
+   * FM-005 / EC-007 / RC-001 (P1.M5.T2.S1): cancel an in-flight abort because the upstream completed
+   * naturally. PRD §16 has NO `Aborting → {Completed, Idle}` edge, so the only legal path back to a clean
+   * `Idle` is `fail()` (Any→Failed, the FSM's escape hatch already used by FM-006 / upstream-error) then
+   * `reset()` (Failed→Idle). Reason `"natural-completion-won"` classifies this as a BENIGN cancellation
+   * (RC-001 winner resolution) for P1.M8 telemetry — NOT a true transition failure. Never throws.
+   *
+   * PRECONDITION: caller has verified `getState() === "Aborting"` and already cleared the FM-006 net.
+   */
+  private _cancelInFlightAbort(): void {
+    this._controller.fail("natural-completion-won"); // Aborting → Failed (Any→Failed; always legal)
+    this._controller.reset();                         // Failed → Idle
+  }
+
   /** Cancel any pending abort timeout (clean-abort completion / unexpected throw / disposal). */
   private _clearAbortTimeout(): void {
     if (this._abortTimer !== undefined) {
@@ -342,10 +366,35 @@ export class StreamProxy {
       for await (const event of upstream) {
         this.trackEvent(event);   // side-effect reasoning detection; never throws; never mutates event
         this._output.push(event); // UNCHANGED transparent forwarding (PRD §19.7)
+        // FM-005 / EC-007 / RC-001 (P1.M5.T2.S1): the upstream emitted its OWN terminal. If an abort is in
+        // flight but the upstream completed naturally, this flag lets natural completion win (see below).
+        if (isTerminalEvent(event)) {
+          this._upstreamCompleted = true;
+        }
       }
-      // Natural exit (terminal already pushed). NOTE: if triggerStop() ran first but the upstream completed
-      // naturally instead of throwing, the catch below does NOT run — that FM-005 race is P1.M5.T2's job.
+      // Natural loop exit. FM-005/EC-007: if the upstream completed naturally WHILE an abort was in flight
+      // (triggerStop set Aborting, but the upstream emitted its terminal instead of throwing), natural
+      // completion wins — cancel the in-flight abort: clear the FM-006 net + reset the FSM to Idle. Gated on
+      // getState()==="Aborting" so a NORMAL completion (state is Reasoning/Idle) is untouched and does NOT emit
+      // the race trace. (For an `error` terminal that already reset the FSM to Idle via trackEvent, this gate is
+      // false → harmless; its FM-006 net, if any, no-ops on fire since the timeout also checks Aborting.)
+      if (this._upstreamCompleted && this._controller.getState() === "Aborting") {
+        this._clearAbortTimeout();
+        this._cancelInFlightAbort();
+        this.diagnostics.trace("proxy.abort.natural-completion-won", {});
+      }
     } catch (err) {
+      // FM-005 / EC-007 / RC-001 (P1.M5.T2.S1): if the upstream already emitted its terminal BEFORE the abort
+      // error was thrown, NATURAL COMPLETION WINS. The terminal was already forwarded above; do NOT take the
+      // abort path (no Capturing/freeze) and do NOT synthesize a second terminal (push is idempotent anyway).
+      if (this._upstreamCompleted) {
+        this._clearAbortTimeout();
+        if (this._controller.getState() === "Aborting") {
+          this._cancelInFlightAbort();
+        }
+        this.diagnostics.trace("proxy.abort.natural-completion-won", {});
+        return; // the original terminal was already forwarded; output is complete
+      }
       // EXPECTED ABORT (PRD §51 Abort Phase): triggerStop() set Aborting + aborted _internalAbort; the
       // upstream iterator threw an abort error. This is the graceful "upstream exit" — complete the transition
       // and freeze reasoning. Do NOT synthesize a terminal: the replacement stream (P1.M6/P1.M7) owns the

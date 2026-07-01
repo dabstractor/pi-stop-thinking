@@ -431,7 +431,7 @@
           "type": "Milestone",
           "id": "P1.M5",
           "title": "Phase 4 — Abort Coordination: Safe Upstream Termination",
-          "status": "Researching",
+          "status": "Complete",
           "description": "Implement the abort mechanism that safely terminates the upstream reasoning stream when the user requests Stop Thinking. The proxy creates an internal AbortController, dispatches abort, waits for upstream exit, and freezes the reasoning buffer.",
           "tasks": [
             {
@@ -467,14 +467,14 @@
               "type": "Task",
               "id": "P1.M5.T2",
               "title": "Abort-vs-Completion Race Handling",
-              "status": "Researching",
+              "status": "Complete",
               "description": "Handle the race condition where the upstream stream completes naturally while or just after abort is dispatched (PRD FM-005, EC-007, RC-001). Natural completion wins.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M5.T2.S1",
                   "title": "Race detection: completion wins over abort",
-                  "status": "Researching",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M5.T1.S1"
@@ -494,21 +494,21 @@
           "type": "Milestone",
           "id": "P1.M6",
           "title": "Phase 5 — Replacement Generation: Thinking-Disabled Request",
-          "status": "Planned",
+          "status": "Researching",
           "description": "Implement the RequestBuilder that constructs a replacement provider request with reasoning disabled, and invoke it through the captured built-in provider.",
           "tasks": [
             {
               "type": "Task",
               "id": "P1.M6.T1",
               "title": "RequestBuilder Module",
-              "status": "Planned",
+              "status": "Researching",
               "description": "Construct the replacement request: same model, same conversation context, same sampling parameters, but with reasoning disabled (reasoning: undefined for z.ai).",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M6.T1.S1",
                   "title": "RequestBuilder with thinking-disabled transformation",
-                  "status": "Planned",
+                  "status": "Researching",
                   "story_points": 2,
                   "dependencies": [
                     "P1.M4.T1.S1"

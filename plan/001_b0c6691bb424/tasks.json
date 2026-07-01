@@ -494,21 +494,21 @@
           "type": "Milestone",
           "id": "P1.M6",
           "title": "Phase 5 — Replacement Generation: Thinking-Disabled Request",
-          "status": "Researching",
+          "status": "Complete",
           "description": "Implement the RequestBuilder that constructs a replacement provider request with reasoning disabled, and invoke it through the captured built-in provider.",
           "tasks": [
             {
               "type": "Task",
               "id": "P1.M6.T1",
               "title": "RequestBuilder Module",
-              "status": "Researching",
+              "status": "Complete",
               "description": "Construct the replacement request: same model, same conversation context, same sampling parameters, but with reasoning disabled (reasoning: undefined for z.ai).",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M6.T1.S1",
                   "title": "RequestBuilder with thinking-disabled transformation",
-                  "status": "Researching",
+                  "status": "Complete",
                   "story_points": 2,
                   "dependencies": [
                     "P1.M4.T1.S1"
@@ -544,14 +544,14 @@
               "type": "Task",
               "id": "P1.M7.T1",
               "title": "Replacement Stream Invocation and Authority Transfer",
-              "status": "Planned",
+              "status": "Researching",
               "description": "After the primary stream is aborted and reasoning is frozen, construct and invoke the replacement request through the captured provider, then begin forwarding replacement events.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M7.T1.S1",
                   "title": "Replacement stream launch and initial event handling",
-                  "status": "Planned",
+                  "status": "Researching",
                   "story_points": 2,
                   "dependencies": [
                     "P1.M5.T1.S1",

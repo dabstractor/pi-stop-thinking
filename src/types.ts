@@ -174,3 +174,35 @@ export function isToolCallEvent(event: AssistantMessageEvent): event is ToolCall
 export function isTerminalEvent(event: AssistantMessageEvent): event is TerminalEvent {
   return TERMINAL_TYPES.has(event.type);
 }
+
+/**
+ * FM-013 / PRD §52 Validation Rules: is a RECOGNIZED-type event missing its critical payload?
+ *
+ * Recognized type but structurally broken (vs. an UNKNOWN type, which §52 passes through unchanged):
+ *   - `done`  without a `message` (the AssistantMessage Pi dereferences at completion) — FATAL downstream.
+ *   - `error` without an `error`  (the AssistantMessage carrying the failure)                — FATAL downstream.
+ *   - `*_delta` (`thinking`/`text`/`toolcall`) whose `delta` is not a string                  — recoverable.
+ * `start` / `*_start` / `*_end` and every unknown type return `false` (recoverable / pass-through).
+ *
+ * The caller (`StreamProxy._emit`) decides severity: a malformed TERMINAL (`isTerminalEvent` true)
+ * cannot carry a valid completion → synthesize a clean error + fail (PRD §54 L4); a malformed
+ * NON-terminal is logged + forwarded best-effort (recoverable).
+ *
+ * - Preconditions: `event` is an `AssistantMessageEvent`.
+ * - Postconditions: returns `true` iff the event is a recognized type missing critical payload.
+ * - Side effects: none. Pure.
+ */
+export function isMalformedEvent(event: AssistantMessageEvent): boolean {
+  switch (event.type) {
+    case "done":
+      return !(event as Extract<AssistantMessageEvent, { type: "done" }>).message;
+    case "error":
+      return !(event as Extract<AssistantMessageEvent, { type: "error" }>).error;
+    case "thinking_delta":
+    case "text_delta":
+    case "toolcall_delta":
+      return typeof (event as Extract<AssistantMessageEvent, { type: "thinking_delta" }>).delta !== "string";
+    default:
+      return false; // start / *_start / *_end / unknown → not malformed (pass through / recoverable)
+  }
+}

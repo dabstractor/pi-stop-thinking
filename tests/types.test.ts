@@ -4,6 +4,7 @@ import {
   isTextEvent,
   isToolCallEvent,
   isTerminalEvent,
+  isMalformedEvent,
 } from "../src/types";
 import type { AssistantMessageEvent } from "@earendil-works/pi-ai";
 
@@ -17,6 +18,10 @@ import type { AssistantMessageEvent } from "@earendil-works/pi-ai";
 function makeEvent(type: string): AssistantMessageEvent {
   return { type } as unknown as AssistantMessageEvent;
 }
+
+/** Sentinel messages for payload-bearing test events (FM-013). */
+const DONE_MESSAGE = { role: "assistant", content: [], model: "test" } as unknown as AssistantMessage;
+const ERROR_MESSAGE = { role: "assistant", content: [], model: "test" } as unknown as AssistantMessage;
 
 const ALL_TYPES = [
   "start",
@@ -93,6 +98,54 @@ describe("isTerminalEvent", () => {
     for (const t of ALL_TYPES) {
       if (t !== "done" && t !== "error") expect(isTerminalEvent(makeEvent(t))).toBe(false);
     }
+  });
+});
+
+describe("isMalformedEvent (FM-013 / PRD §52)", () => {
+  /** Build an event with a payload field set (or missing). */
+  function makePayloadEvent(type: string, payload?: Record<string, unknown>): AssistantMessageEvent {
+    return { type, ...payload } as unknown as AssistantMessageEvent;
+  }
+
+  test("done WITH message → false; done WITHOUT message → true", () => {
+    expect(isMalformedEvent(makePayloadEvent("done", { message: DONE_MESSAGE }))).toBe(false);
+    expect(isMalformedEvent(makePayloadEvent("done"))).toBe(true);
+    expect(isMalformedEvent(makePayloadEvent("done", { message: undefined }))).toBe(true);
+  });
+
+  test("error WITH error → false; error WITHOUT error → true", () => {
+    expect(isMalformedEvent(makePayloadEvent("error", { error: ERROR_MESSAGE }))).toBe(false);
+    expect(isMalformedEvent(makePayloadEvent("error"))).toBe(true);
+    expect(isMalformedEvent(makePayloadEvent("error", { error: undefined }))).toBe(true);
+  });
+
+  test("*_delta WITH string delta → false; *_delta WITHOUT delta or non-string delta → true", () => {
+    for (const t of ["thinking_delta", "text_delta", "toolcall_delta"]) {
+      expect(isMalformedEvent(makePayloadEvent(t, { delta: "hello" }))).toBe(false);
+      expect(isMalformedEvent(makePayloadEvent(t))).toBe(true);
+      expect(isMalformedEvent(makePayloadEvent(t, { delta: undefined }))).toBe(true);
+      expect(isMalformedEvent(makePayloadEvent(t, { delta: 123 }))).toBe(true);
+    }
+  });
+
+  test("start / *_start / *_end → false (recoverable / pass-through)", () => {
+    for (const t of ["start", "text_start", "text_end", "thinking_start", "thinking_end", "toolcall_start", "toolcall_end"]) {
+      expect(isMalformedEvent(makePayloadEvent(t))).toBe(false);
+    }
+  });
+
+  test("unknown type → false (PRD §52: pass through unchanged)", () => {
+    expect(isMalformedEvent(makePayloadEvent("totally_bogus_type"))).toBe(false);
+    expect(isMalformedEvent(makePayloadEvent("custom_event", { foo: "bar" }))).toBe(false);
+  });
+
+  test("reads ONLY type + the critical payload field (privacy/contract)", () => {
+    // Event with unrelated junk fields — isMalformedEvent must not inspect them.
+    const event = makePayloadEvent("text_delta", { delta: "hello", secretPayload: "should not be read", apiKey: "sk-xxx" });
+    expect(isMalformedEvent(event)).toBe(false);
+    // done with message + junk → still false (only type + message checked)
+    const doneWithJunk = makePayloadEvent("done", { message: DONE_MESSAGE, extra: 42 });
+    expect(isMalformedEvent(doneWithJunk)).toBe(false);
   });
 });
 

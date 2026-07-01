@@ -670,7 +670,7 @@
               "type": "Task",
               "id": "P1.M8.T2",
               "title": "Failure Mode Handling (FM-001 through FM-015)",
-              "status": "Researching",
+              "status": "Complete",
               "description": "Implement detection and recovery for all 15 failure modes defined in PRD §42 and all edge cases from Appendix B.",
               "subtasks": [
                 {
@@ -704,7 +704,7 @@
                   "type": "Subtask",
                   "id": "P1.M8.T2.S2",
                   "title": "Provider failure modes and recovery hierarchy",
-                  "status": "Researching",
+                  "status": "Complete",
                   "story_points": 2,
                   "dependencies": [
                     "P1.M8.T2.S1"
@@ -735,14 +735,14 @@
               "type": "Task",
               "id": "P1.M8.T3",
               "title": "Extension Lifecycle and Re-registration Handling",
-              "status": "Planned",
+              "status": "Ready",
               "description": "Handle extension disable/unload/reload scenarios (EC-011 through EC-016) to ensure clean lifecycle management.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M8.T3.S1",
                   "title": "Session shutdown cleanup and provider restoration",
-                  "status": "Planned",
+                  "status": "Ready",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M7.T3.S1"

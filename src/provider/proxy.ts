@@ -61,7 +61,7 @@ import type {
 import type { Diagnostics } from "../diagnostics";
 // Re-exported by P1.M2.T1.S1 (single local vocabulary); same type as the pi-ai symbol.
 import type { AssistantMessageEvent, TransitionState, ProxyPhase } from "../types";
-import { isTerminalEvent, isThinkingEvent, isTextEvent, isToolCallEvent } from "../types";
+import { isTerminalEvent, isThinkingEvent, isTextEvent, isToolCallEvent, isMalformedEvent } from "../types";
 import type { TransitionCoordinator } from "../state/coordinator";
 import { RequestBuilder } from "../request/builder";
 // Reasoning detection collaborators (P1.M4.T2.S1: PRD §22 detection + §16 FSM + §13.4/§23 buffer).
@@ -88,6 +88,10 @@ export class StreamProxy {
   private readonly _controller: TransitionController;
   /** Per-request reasoning capture (PRD §13.4/§23). Forward-compat: P1.M5 (freeze) / P1.M6 (snapshot). */
   private readonly _buffer: ReasoningBuffer;
+
+  /** The streamed model — retained so _emit can synthesize a clean error terminal on a malformed
+   *  terminal event (FM-013). Only .id/.api/.provider are read (makeErrorAssistantMessage). */
+  private readonly _model: Model<Api>;
 
   /**
    * Internal abort controller for the UPSTREAM stream ONLY (PRD §51 Abort Phase). Per-request, so the proxy
@@ -225,6 +229,7 @@ export class StreamProxy {
     replacementStartupTimeoutMs: number = DEFAULT_CONFIG.replacementStartupTimeoutMs,
     coordinator?: TransitionCoordinator, // P1.M7.T3.S1 — optional session coordinator
   ) {
+    this._model = model;
     this.diagnostics = diagnostics;
     this._output = createAssistantMessageEventStream();
     this._controller = controller ?? new TransitionController(diagnostics);
@@ -494,6 +499,9 @@ export class StreamProxy {
   }
 
   /**
+   * Performs FM-013 malformed-event validation and FM-015 stray-discard at the top (before authority
+   * branching); then the §18 filtering. Both guards apply uniformly to primary + replacement events.
+   *
    * The unified downstream forwarding filter (PRD §18 Event Forwarding Rules / §39 Transition Event Rules).
    * Both {@link run}'s primary loop and {@link _launchReplacement}'s replacement loop (plus its catch's
    * synthesized terminal) forward through HERE, so the single-`start` (INV-002) and single-terminal (INV-003)
@@ -525,6 +533,38 @@ export class StreamProxy {
    * PRIVACY (Appendix H): `proxy.splice.*` traces log `{}` only — never content/options/reasoning/prompt.
    */
   private _emit(event: AssistantMessageEvent): void {
+    // FM-013 / PRD §52 Validation Rules — detect malformed recognized-type events. Unknown-type events
+    // are NOT malformed (isMalformedEvent returns false) and pass through unchanged (§52 "Unknown events").
+    if (isMalformedEvent(event)) {
+      this.diagnostics.warn("proxy.event.malformed", { type: event.type }); // privacy — type ONLY (Appendix H)
+      if (isTerminalEvent(event)) {
+        // A malformed TERMINAL (done w/o message / error w/o error) cannot carry a valid completion →
+        // downstream integrity at risk. Synthesize ONE clean error terminal (preserves single-terminal /
+        // single-result invariants) and fail the transition (PRD §54 L4 / §52 "terminate only if downstream
+        // integrity cannot be preserved"). _terminate is idempotent → safe if a terminal was already pushed.
+        if (!this._messageEndEmitted) {
+          this._messageEndEmitted = true;
+          this._output.push({
+            type: "error",
+            reason: "error",
+            error: this.makeErrorAssistantMessage(this._model, "malformed terminal event"),
+          });
+        }
+        this._terminate(false, "malformed-terminal");
+        return;
+      }
+      // Malformed NON-terminal (e.g. *_delta missing delta) → forward best-effort (fall through).
+    }
+
+    // FM-015 / PRD §39 "Forbidden: emit upstream completion after replacement begins": after the single
+    // terminal was forwarded, any further NON-terminal event is a stray from the post-transfer stream.
+    // Discard with a trace. (Terminal strays are deduped per-phase below with proxy.splice.duplicate-terminal;
+    // this guard is gated on !isTerminalEvent so it never shadows that trace.)
+    if (this._messageEndEmitted && !isTerminalEvent(event)) {
+      this.diagnostics.trace("proxy.splice.discard-after-completion", {}); // privacy — {} only (Appendix H)
+      return;
+    }
+
     if (this._authority === "forwarding") {
       // PRIMARY phase (PRD §18 "Before Stop") — forward all, track the start/terminal flags.
       if (event.type === "start") {

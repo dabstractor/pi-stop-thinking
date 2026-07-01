@@ -87,6 +87,32 @@ export class StreamProxy {
   private readonly _buffer: ReasoningBuffer;
 
   /**
+   * Internal abort controller for the UPSTREAM stream ONLY (PRD §51 Abort Phase). Per-request, so the proxy
+   * can abort the reasoning stream WITHOUT aborting Pi's overall request (whose signal is `options.signal`).
+   * `triggerStop()` aborts this; `run()` passes `this._internalAbort.signal` to `upstreamStreamFn`. The
+   * upstream's async iterator throws when aborted — `run()`'s catch treats that throw as the expected exit.
+   */
+  private readonly _internalAbort: AbortController = new AbortController();
+
+  /**
+   * Pending abort-timeout timer (FM-006/§43). Armed by `triggerStop()` when abort is dispatched; cleared when
+   * `run()` observes the upstream exit (clean abort) or when it fires (→ `Failed`). `undefined` when idle.
+   */
+  private _abortTimer: ReturnType<typeof setTimeout> | undefined;
+
+  /** Hard ceiling (ms) for the upstream to close after abort before the transition fails (PRD §43). Defaults
+   *  to `DEFAULT_CONFIG.transitionTimeoutMs`; tests inject a small value to exercise FM-006 quickly. */
+  private readonly _abortTimeoutMs: number;
+
+  /**
+   * States in which a transition is IN FLIGHT (past `Reasoning`, not yet terminal). `isInterrupting()` is
+   * `true` here (PRD §24.3 / INV-004) — used by the coordinator/ShortcutManager to discard repeat presses.
+   */
+  private static readonly INTERRUPTING_STATES: ReadonlySet<TransitionState> = new Set<TransitionState>([
+    "StopRequested", "Aborting", "Capturing", "Restarting", "Splicing", "Answering",
+  ]);
+
+  /**
    * Construct the proxy and immediately start forwarding.
    *
    * @param model            The model being streamed (api/provider/id used for diagnostics + the
@@ -114,11 +140,23 @@ export class StreamProxy {
     diagnostics: Diagnostics,
     controller?: TransitionController,
     buffer?: ReasoningBuffer,
+    abortTimeoutMs: number = DEFAULT_CONFIG.transitionTimeoutMs,
   ) {
     this.diagnostics = diagnostics;
     this._output = createAssistantMessageEventStream();
     this._controller = controller ?? new TransitionController(diagnostics);
     this._buffer = buffer ?? new ReasoningBuffer(diagnostics, DEFAULT_CONFIG.maximumReasoningBufferBytes);
+    this._abortTimeoutMs = abortTimeoutMs;
+
+    // Propagate Pi's abort (user escape / ctrl+c) into the INTERNAL controller so the upstream still stops on
+    // escape, while keeping a SEPARATE controller the extension can abort via triggerStop() without touching
+    // Pi's request. (One-way fan-in: external.aborted → internal.abort(); never the reverse.)
+    const external = options?.signal;
+    if (external) {
+      if (external.aborted) this._internalAbort.abort();
+      else external.addEventListener("abort", () => this._internalAbort.abort(), { once: true });
+    }
+
     // Fire-and-forget: run() never rethrows (it converts any error into a single terminal event).
     void this.run(model, context, options, upstreamStreamFn);
   }
@@ -145,6 +183,58 @@ export class StreamProxy {
   /** Whether reasoning is currently flowing (PRD §22.5). P1.M4.T4's coordinator delegates to this. */
   isReasoning(): boolean {
     return this._controller.getState() === "Reasoning";
+  }
+
+  /** Shortcut availability: `true` ONLY in `Reasoning` (PRD §22.5). Pure delegate to the FSM. */
+  canInterrupt(): boolean {
+    return this._controller.canInterrupt();
+  }
+
+  /** A transition is in flight (PRD §24.3 / INV-004): state has left `Reasoning` but not reached terminal.
+   *  Used by the coordinator/ShortcutManager to discard repeat presses (EC-009/EC-010). */
+  isInterrupting(): boolean {
+    return StreamProxy.INTERRUPTING_STATES.has(this._controller.getState());
+  }
+
+  /**
+   * Dispatch the stop transition (PRD §51 Stop Request → Abort Phase). This method only DISPATCHES the abort;
+   * it does NOT await the upstream exit. The Aborting→Capturing move + `buffer.freeze()` happen in `run()`'s
+   * catch when the upstream iterator throws (asynchronously). See T1/T2 boundary in JSDoc/PRP.
+   *
+   * Steps: (a) gate on `canInterrupt()` (PRD §22.5); (b) `requestStop()` Reasoning→StopRequested; (c)
+   * `beginAbort()` StopRequested→Aborting; (d) `_internalAbort.abort()` (upstream throws); arm the FM-006
+   * timeout; (g) return `true`.
+   *
+   * @returns `true` if the abort was dispatched; `false` if not in `Reasoning` (no abort, no state change).
+   */
+  triggerStop(): boolean {
+    if (!this._controller.canInterrupt()) return false; // (a) PRD §22.5 — not in Reasoning
+    this._controller.requestStop();  // (b) Reasoning → StopRequested (PRD §16; legal after the gate)
+    this._controller.beginAbort();   // (c) StopRequested → Aborting (PRD §16)
+    this._internalAbort.abort();     // (d) upstream iterator throws an abort error (PRD §51 "Await Upstream Exit")
+    this._startAbortTimeout();       // FM-006 safety net
+    return true;                     // (g)
+  }
+
+  /** Arm the FM-006/§43 abort timeout. If the upstream ignores the abort and never closes within
+   *  `_abortTimeoutMs`, fail the transition. */
+  private _startAbortTimeout(): void {
+    this._clearAbortTimeout();
+    this._abortTimer = setTimeout(() => {
+      // Only act if we are STILL aborting (a clean abort cleared this timer; a natural completion is T2).
+      if (this._controller.getState() === "Aborting") {
+        this.diagnostics.warn("proxy.abort.timeout", { timeoutMs: this._abortTimeoutMs });
+        this._controller.fail("abort-timeout"); // Aborting → Failed (PRD §16 Any→Failed; never throws)
+      }
+    }, this._abortTimeoutMs);
+  }
+
+  /** Cancel any pending abort timeout (clean-abort completion / unexpected throw / disposal). */
+  private _clearAbortTimeout(): void {
+    if (this._abortTimer !== undefined) {
+      clearTimeout(this._abortTimer);
+      this._abortTimer = undefined;
+    }
   }
 
   /**
@@ -246,14 +336,38 @@ export class StreamProxy {
     upstreamStreamFn: ApiStreamSimpleFunction,
   ): Promise<void> {
     try {
-      const upstream = upstreamStreamFn(model, context, options);
+      // Inject the INTERNAL signal (NOT options.signal) so triggerStop() can abort reasoning without
+      // aborting Pi's overall request. options.signal was already fan-in'd into _internalAbort in the ctor.
+      const upstream = upstreamStreamFn(model, context, { ...options, signal: this._internalAbort.signal });
       for await (const event of upstream) {
         this.trackEvent(event);   // side-effect reasoning detection; never throws; never mutates event
         this._output.push(event); // UNCHANGED transparent forwarding (PRD §19.7)
       }
-      // Natural exit — terminal already pushed; nothing more to do.
+      // Natural exit (terminal already pushed). NOTE: if triggerStop() ran first but the upstream completed
+      // naturally instead of throwing, the catch below does NOT run — that FM-005 race is P1.M5.T2's job.
     } catch (err) {
+      // EXPECTED ABORT (PRD §51 Abort Phase): triggerStop() set Aborting + aborted _internalAbort; the
+      // upstream iterator threw an abort error. This is the graceful "upstream exit" — complete the transition
+      // and freeze reasoning. Do NOT synthesize a terminal: the replacement stream (P1.M6/P1.M7) owns the
+      // downstream terminal, so output must stay OPEN while the transition is in flight.
+      if (this._controller.getState() === "Aborting") {
+        this._clearAbortTimeout(); // clean abort — cancel the FM-006 safety net
+        try {
+          this._controller.completeAbort(); // Aborting → Capturing (PRD §16)
+        } catch (e) {
+          // Should not happen (state is Aborting), but never let completion break the catch.
+          this.diagnostics.warn("proxy.abort.complete-abort-failed", {
+            error: e instanceof Error ? e.message : String(e),
+          });
+        }
+        this._buffer.freeze(); // (PRD §41: reasoning immutable once frozen; §40: replacement needs this)
+        this.diagnostics.trace("proxy.abort.completed", {});
+        return; // leave output OPEN — replacement stream (P1.M6/P1.M7) owns the terminal
+      }
+      // UNEXPECTED throw (network/provider error, or an abort-timeout-then-throw) → synthesize ONE terminal
+      // so output.result() never hangs (single-terminal/single-result invariant). (Existing behavior.)
       const message = err instanceof Error ? err.message : String(err);
+      this._clearAbortTimeout();
       this.diagnostics.warn("proxy.forward.upstream-threw", {
         provider: String(model.provider),
         model: model.id,

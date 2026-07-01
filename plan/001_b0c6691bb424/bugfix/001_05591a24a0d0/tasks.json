@@ -169,14 +169,14 @@
               "type": "Task",
               "id": "P1.M3.T1",
               "title": "Add reasoningEnded flag and gate shortcut availability",
-              "status": "Planned",
+              "status": "Complete",
               "description": "Add a private _reasoningEnded flag to StreamProxy, set it in trackEvent() on the PRD §22.4 leave-conditions (thinking_end, text_start, toolcall_start while in Reasoning), and gate both canInterrupt() and triggerStop()'s entry guard on it. The FSM (controller.ts) is NOT modified — the flag approach avoids breaking the §16 table and existing tests that assert the controller stays in Reasoning on normal completion.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M3.T1.S1",
                   "title": "Add _reasoningEnded flag, set on §22.4 leave-conditions, gate canInterrupt() and triggerStop()",
-                  "status": "Planned",
+                  "status": "Complete",
                   "story_points": 2,
                   "dependencies": [
                     "P1.M2.T2.S2"

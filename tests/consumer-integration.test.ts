@@ -51,12 +51,14 @@ describe("Consumer integration — Issue 1 end-to-end (P1.M2.T3.S1)", () => {
   test("interrupted reasoning PERSISTS as [thinking, text] through the real consumer (regression guard)", async () => {
     const { proxy, events, mock } = buildRealisticProxy();
 
-    // (b) PRIMARY reasoning stream: start → thinking_start[0] → 3× thinking_delta[0] → thinking_end[0].
+    // (b) PRIMARY reasoning stream: start → thinking_start[0] → 3× thinking_delta[0].
     //     (Mock derives contentIndex=0 + stamps the live accumulating partial — exactly like the provider.)
+    //     NOTE: do NOT push thinking_end before triggerStop — that is a §22.4 leave-condition which
+    //     sets the _reasoningEnded flag (P1.M3.T1.S1), making triggerStop() a no-op. The stop must
+    //     happen DURING reasoning (while the shortcut is armed).
     mock.pushPrimary({ type: "start" });
     mock.pushPrimary({ type: "thinking_start" });
     for (const d of PRIMARY_REASONING) mock.pushPrimary({ type: "thinking_delta", delta: d });
-    mock.pushPrimary({ type: "thinking_end" });
 
     // (c) wait until the proxy has entered Reasoning (run() processed the thinking events → offset will be 1).
     await waitFor(() => proxy.isReasoning());

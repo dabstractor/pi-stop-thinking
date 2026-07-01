@@ -166,6 +166,19 @@ export class StreamProxy {
   private _authority: ProxyPhase = "forwarding";
 
   /**
+   * P1.M3.T1.S1 (Issue 2) — set `true` in {@link trackEvent} on a PRD §22.4 reasoning leave-condition
+   * (`thinking_end` OR the first answer token `text_*`/`toolcall_*`) while the controller is in `Reasoning`.
+   * Consumed by {@link canInterrupt} (and, via it, {@link triggerStop}) to DISABLE the shortcut once reasoning
+   * has ended. The §16 FSM has NO normal `Reasoning` exit, so this is a proxy-level gate — NOT an FSM state
+   * (PRD Appendix F's "no boolean lifecycle flags" rule governs `TransitionState`, not these internal routing
+   * counters; see `_upstreamCompleted`/`_messageStartEmitted`). `trackEvent` runs ONLY in the primary loop
+   * (`run`'s for-await, before `_emit`); replacement events NEVER run `trackEvent` (the buffer is frozen), so
+   * the flag applies solely to the primary reasoning phase. Per-request (fresh per `StreamProxy` construction);
+   * never reset (a replacement stream cannot re-arm reasoning). See PRD §22.4/§22.5/EC-005/EC-006/RC-002.
+   */
+  private _reasoningEnded = false;
+
+  /**
    * FM-005 / EC-007 / RC-001 (P1.M5.T2.S1): set `true` the moment the upstream emits its OWN terminal
    * (`done`/`error`) event AND it is forwarded into `output`. Lets `run()` distinguish a CLEAN abort
    * (upstream threw on abort, no terminal yet → proceed to Capturing) from a race the UPSTREAM WON
@@ -324,9 +337,13 @@ export class StreamProxy {
     return this._controller.getState() === "Reasoning";
   }
 
-  /** Shortcut availability: `true` ONLY in `Reasoning` (PRD §22.5). Pure delegate to the FSM. */
+  /** Shortcut availability: `true` ONLY while `Reasoning` AND reasoning has not yet ended (PRD §22.5 + §22.4).
+   *  P1.M3.T1.S1 (Issue 2): gates on {@link _reasoningEnded} so the shortcut disables the moment reasoning
+   *  ends (on `thinking_end` OR the first answer token). This DIVERGES from the controller's `canInterrupt()`
+   *  (the proxy adds the `!_reasoningEnded` gate; the controller keeps pure FSM state for transition legality).
+   *  {@link isReasoning} is NOT gated (telemetry-only, pure FSM delegate). */
   canInterrupt(): boolean {
-    return this._controller.canInterrupt();
+    return this._controller.getState() === "Reasoning" && !this._reasoningEnded;
   }
 
   /** Stream started, reasoning not yet begun (PRD §16 `Delegating`). EC-002 pending-stop window.
@@ -353,7 +370,7 @@ export class StreamProxy {
    * @returns `true` if the abort was dispatched; `false` if not in `Reasoning` (no abort, no state change).
    */
   triggerStop(): boolean {
-    if (!this._controller.canInterrupt()) return false; // (a) PRD §22.5 — not in Reasoning
+    if (!this.canInterrupt()) return false; // (a) PRD §22.5 — not in Reasoning (P1.M3.T1.S1: gated on _reasoningEnded)
     this._controller.requestStop();  // (b) Reasoning → StopRequested (PRD §16; legal after the gate)
     this._controller.beginAbort();   // (c) StopRequested → Aborting (PRD §16)
     this._internalAbort.abort();     // (d) upstream iterator throws an abort error (PRD §51 "Await Upstream Exit")
@@ -509,6 +526,18 @@ export class StreamProxy {
       if (event.type === "thinking_delta" && this._controller.getState() === "Reasoning") {
         this._buffer.append(event.delta);
       }
+      // 3b. P1.M3.T1.S1 (Issue 2) — set the reasoningEnded flag on the PRD §22.4 leave-conditions. The §16 FSM
+      //     has NO normal Reasoning→* exit, so this is a pure proxy-level flag; trackEvent() runs ONLY in the
+      //     primary loop (replacement events never run trackEvent — the buffer is frozen), so the flag applies
+      //     solely to the primary reasoning phase. `event.type === "thinking_end"` is a DIRECT compare (NOT
+      //     isThinkingEvent, which would wrongly match thinking_start/thinking_delta). Setting a boolean is
+      //     idempotent, so catching all three conditions here is harmless.
+      if (
+        this._controller.getState() === "Reasoning" &&
+        (event.type === "thinking_end" || isTextEvent(event) || isToolCallEvent(event))
+      ) {
+        this._reasoningEnded = true;
+      }
       // 4. Terminals (PRD §16). error → Any→Failed (fail never throws) → Failed→Idle.
       //    done → Completed→Idle ONLY when legal (the interrupted flow reaches Answering→Completed
       //    in P1.M5–P1.M7). In the NORMAL flow §16 defines no Reasoning→Completed exit, so done
@@ -523,9 +552,10 @@ export class StreamProxy {
       }
       // NOTE (PRD §22.4 "leave reasoning on thinking_end / first answer token"): §16 defines no
       // normal Reasoning exit, so thinking_end / text_start / toolcall_start perform NO transition here.
-      // Reasoning detection remains Reasoning-true until the stream terminates. Acceptable in
-      // P1.M4 (no shortcut/coordinator wired); reconciled when the interruption flow
-      // (Reasoning→StopRequested, P1.M5) is the active path.
+      // Reasoning detection remains Reasoning-true until the stream terminates. The `_reasoningEnded` flag
+      // (step 3b, P1.M3.T1.S1) gates `canInterrupt()`/`triggerStop()` so the shortcut disables once reasoning
+      // ends, without extending the FSM. Acceptable in P1.M4 (no shortcut/coordinator wired); reconciled when
+      // the interruption flow (Reasoning→StopRequested, P1.M5) is the active path.
     } catch (err) {
       // Tracking MUST NEVER break forwarding (observational equivalence — ADR-005/§19.7).
       // Log the fault (event.type ONLY — never content, Appendix H) and swallow;

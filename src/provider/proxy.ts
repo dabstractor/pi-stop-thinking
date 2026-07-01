@@ -61,7 +61,7 @@ import type {
 import type { Diagnostics } from "../diagnostics";
 // Re-exported by P1.M2.T1.S1 (single local vocabulary); same type as the pi-ai symbol.
 import type { AssistantMessageEvent, TransitionState, ProxyPhase } from "../types";
-import { isTerminalEvent } from "../types";
+import { isTerminalEvent, isThinkingEvent } from "../types";
 import { RequestBuilder } from "../request/builder";
 // Reasoning detection collaborators (P1.M4.T2.S1: PRD §22 detection + §16 FSM + §13.4/§23 buffer).
 import { TransitionController, ALLOWED_TRANSITIONS } from "../state/controller";
@@ -146,6 +146,26 @@ export class StreamProxy {
    * Checked FIRST in the catch and in the natural-exit path. Set in `run()`'s loop right after `push`.
    */
   private _upstreamCompleted = false;
+
+  /**
+   * INV-002 (Appendix O): exactly one downstream `start` is forwarded, regardless of how many upstream
+   * streams are spliced. Set by {@link _emit} the first time it forwards a `start` (always the PRIMARY's
+   * start, in the "forwarding" phase). The REPLACEMENT's `start` is suppressed (PRD §18 "Already emitted").
+   * Routing flag (NOT lifecycle state — see PRD Appendix F: the "no boolean lifecycle flags" rule applies to
+   * the FSM `TransitionState`, not internal routing counters; the proxy already uses `_upstreamCompleted`).
+   */
+  private _messageStartEmitted = false;
+
+  /**
+   * INV-003 (Appendix O): exactly one downstream terminal (`done`/`error`) is forwarded, regardless of how
+   * many upstream streams are spliced. Set by {@link _emit} the first time it forwards a terminal. Any
+   * subsequent terminal is discarded with a `proxy.splice.duplicate-terminal` trace (PRD FM-014 duplicate
+   * completion / FM-015 terminal after authority transfer — identical handling: discard + log).
+   *
+   * NOTE: `EventStream.push` ALREADY no-ops once a terminal has set `done=true`, so dedup is correct even
+   * without this flag; the flag exists ONLY to emit the FM-014/FM-015 diagnostic trace.
+   */
+  private _messageEndEmitted = false;
 
   /**
    * States in which a transition is IN FLIGHT (past `Reasoning`, not yet terminal). `isInterrupting()` is
@@ -383,6 +403,78 @@ export class StreamProxy {
   }
 
   /**
+   * The unified downstream forwarding filter (PRD §18 Event Forwarding Rules / §39 Transition Event Rules).
+   * Both {@link run}'s primary loop and {@link _launchReplacement}'s replacement loop (plus its catch's
+   * synthesized terminal) forward through HERE, so the single-`start` (INV-002) and single-terminal (INV-003)
+   * invariants hold across the spliced primary+replacement streams.
+   *
+   * Branches on {@link _authority} (the contract's `authority === 'primary'/'replacement'`, modeled as
+   * `ProxyPhase`: `"forwarding"` == primary, `"splicing"` == replacement):
+   *
+   * PRIMARY (`"forwarding"`, PRD §18 "Before Stop"): forward EVERY event unchanged; on `start` set
+   *   {@link _messageStartEmitted}; on a terminal set {@link _messageEndEmitted} (a duplicate terminal here is
+   *   discarded with a trace — defensive, INV-003).
+   *
+   * REPLACEMENT (`"splicing"`, PRD §18 "After Restart"):
+   *   - `start`            → SUPPRESS (already emitted — PRD §18); trace `proxy.splice.start-suppressed`.
+   *   - `thinking_*`       → SKIP silently (never emit after restart — PRD §18; EC-017 stray reasoning).
+   *   - `done`/`error`     → forward ONCE (set {@link _messageEndEmitted}); a duplicate/after-transfer terminal
+   *                          is discarded with `proxy.splice.duplicate-terminal` (PRD FM-014 / FM-015).
+   *   - `text_*`/`toolcall_*` → forward.
+   *
+   * COMPLETION: forwarding a terminal via `this._output.push(event)` ALREADY completes `output` and resolves
+   * `output.result()` with `event.message` (done) / `event.error` (error) — see `EventStream` semantics. So NO
+   * explicit `output.end()` is made (consistent with the primary path; the existing JSDoc forbids it as
+   * "unnecessary and contrary to the exits-naturally contract"). The contract's "output.end(result)" is the
+   * guarantee `push(terminal)` fulfills.
+   *
+   * This method NEVER calls {@link trackEvent} (trackEvent runs only in the primary loop, before `_emit`; the
+   * reasoning buffer is FROZEN during the replacement phase). It never mutates/reorders/duplicates an event.
+   *
+   * PRIVACY (Appendix H): `proxy.splice.*` traces log `{}` only — never content/options/reasoning/prompt.
+   */
+  private _emit(event: AssistantMessageEvent): void {
+    if (this._authority === "forwarding") {
+      // PRIMARY phase (PRD §18 "Before Stop") — forward all, track the start/terminal flags.
+      if (event.type === "start") {
+        this._messageStartEmitted = true; // the primary's start is THE downstream start (INV-002)
+      }
+      if (isTerminalEvent(event)) {
+        if (this._messageEndEmitted) {
+          this.diagnostics.trace("proxy.splice.duplicate-terminal", {}); // defensive dedup (INV-003)
+          return;
+        }
+        this._messageEndEmitted = true; // push(terminal) below completes output + resolves result()
+        this._output.push(event);
+        return;
+      }
+      this._output.push(event); // forward unchanged
+      return;
+    }
+
+    // REPLACEMENT phase (_authority === "splicing") — PRD §18 "After Restart" / §39.
+    if (event.type === "start") {
+      // Already emitted by the primary (INV-002) — suppress the replacement's duplicate start.
+      this.diagnostics.trace("proxy.splice.start-suppressed", {});
+      return;
+    }
+    if (isThinkingEvent(event)) {
+      // Never emit after restart (PRD §18); also covers EC-017 (replacement returns reasoning anyway).
+      return; // silent skip — high-frequency, no per-event trace to avoid spam
+    }
+    if (isTerminalEvent(event)) {
+      if (this._messageEndEmitted) {
+        // FM-014 (duplicate completion) / FM-015 (terminal after authority transfer) — discard + trace.
+        this.diagnostics.trace("proxy.splice.duplicate-terminal", {});
+        return;
+      }
+      this._messageEndEmitted = true; // the replacement's terminal is THE downstream terminal (INV-003)
+    }
+    // text_start/delta/end + toolcall_* (and the first terminal) → forward.
+    this._output.push(event);
+  }
+
+  /**
    * Forward every event from the single authoritative upstream into {@link output}, unchanged.
    * Before each forward, runs {@link trackEvent} to drive reasoning detection (PRD §22) as a
    * pure side effect — detection never mutates, drops, reorders, or duplicates an event.
@@ -412,7 +504,7 @@ export class StreamProxy {
       const upstream = upstreamStreamFn(model, context, { ...options, signal: this._internalAbort.signal });
       for await (const event of upstream) {
         this.trackEvent(event);   // side-effect reasoning detection; never throws; never mutates event
-        this._output.push(event); // UNCHANGED transparent forwarding (PRD §19.7)
+        this._emit(event);        // §18 filtering: forwarding phase → forward all; set INV-002/INV-003 flags
         // FM-005 / EC-007 / RC-001 (P1.M5.T2.S1): the upstream emitted its OWN terminal. If an abort is in
         // flight but the upstream completed naturally, this flag lets natural completion win (see below).
         if (isTerminalEvent(event)) {
@@ -555,9 +647,9 @@ export class StreamProxy {
           this._authority = "splicing";
           this.diagnostics.trace("proxy.replacement.first-event", {}); // privacy-safe — {} only (Appendix H)
         }
-        // BASELINE forward (T2 refines filtering; T3 owns completion). The primary pushed no terminal, so the
-        // replacement's done is the single terminal (push completes output). `push` is idempotent if complete.
-        this._output.push(event);
+        // §18 filtering: replacement start suppressed (already emitted); thinking_* skipped; text_*/toolcall_*
+        // forwarded; first terminal forwarded (+ completes output), duplicates discarded (FM-014/FM-015).
+        this._emit(event);
       }
       // Replacement stream ended naturally (its terminal was forwarded → output completes). T3 owns the
       // Splicing→Answering→Completed lifecycle; this subtask leaves the FSM in Splicing.
@@ -576,7 +668,7 @@ export class StreamProxy {
       if (this._controller.getState() !== "Failed") {
         this.diagnostics.warn("proxy.replacement.failed", { error: message });
       }
-      this._output.push({
+      this._emit({
         type: "error",
         reason: "error",
         error: this.makeErrorAssistantMessage(model, message),

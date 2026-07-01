@@ -537,7 +537,7 @@
           "type": "Milestone",
           "id": "P1.M7",
           "title": "Phase 6 — Stream Splicing: Seamless Authority Transfer",
-          "status": "Planned",
+          "status": "Researching",
           "description": "Implement the complete stream splicing algorithm: after aborting the primary stream, launch the replacement stream, suppress primary terminal events, transfer authority to the replacement, and forward replacement events — all through the single downstream AssistantMessageEventStream.",
           "tasks": [
             {
@@ -574,14 +574,14 @@
               "type": "Task",
               "id": "P1.M7.T2",
               "title": "Terminal Event Suppression and Replacement Forwarding",
-              "status": "Researching",
+              "status": "Complete",
               "description": "Suppress terminal events (done/error) from the primary stream and forward replacement stream events to the output. Ensure exactly one terminal event reaches Pi.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M7.T2.S1",
                   "title": "Event filtering: suppress primary terminal, forward replacement events",
-                  "status": "Researching",
+                  "status": "Complete",
                   "story_points": 2,
                   "dependencies": [
                     "P1.M7.T1.S1"
@@ -603,14 +603,14 @@
               "type": "Task",
               "id": "P1.M7.T3",
               "title": "Full Transition Algorithm Integration",
-              "status": "Planned",
+              "status": "Researching",
               "description": "Integrate all components into the complete Stop Thinking lifecycle: from idle through reasoning → abort → replacement → splicing → answering → completion. Verify the full state machine cycle.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M7.T3.S1",
                   "title": "End-to-end transition lifecycle and cleanup",
-                  "status": "Planned",
+                  "status": "Researching",
                   "story_points": 2,
                   "dependencies": [
                     "P1.M7.T2.S1",

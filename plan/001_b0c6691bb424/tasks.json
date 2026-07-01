@@ -306,7 +306,7 @@
           "type": "Milestone",
           "id": "P1.M4",
           "title": "Phase 3 — Reasoning Detection: Buffer, Shortcut, and Coordinator",
-          "status": "Researching",
+          "status": "Complete",
           "description": "Implement reasoning event detection within the StreamProxy, the ReasoningBuffer for capturing thinking deltas, the ShortcutManager for keyboard input, and the TransitionCoordinator that bridges them.",
           "tasks": [
             {
@@ -402,14 +402,14 @@
               "type": "Task",
               "id": "P1.M4.T4",
               "title": "TransitionCoordinator Bridge Module",
-              "status": "Researching",
+              "status": "Complete",
               "description": "Bridge between ShortcutManager (shortcut handler) and StreamProxy (active proxy instance). Holds a reference to the currently active proxy and delegates stop requests.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M4.T4.S1",
                   "title": "TransitionCoordinator with active proxy delegation",
-                  "status": "Researching",
+                  "status": "Complete",
                   "story_points": 2,
                   "dependencies": [
                     "P1.M4.T2.S1",
@@ -438,14 +438,14 @@
               "type": "Task",
               "id": "P1.M5.T1",
               "title": "Internal AbortController Management and Upstream Abort",
-              "status": "Planned",
+              "status": "Researching",
               "description": "Implement the abort coordination: create an internal AbortController that wraps Pi's signal, dispatch abort when Stop is requested, and handle the upstream stream's abort error gracefully.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M5.T1.S1",
                   "title": "AbortController wrapper and upstream stream abort handling",
-                  "status": "Planned",
+                  "status": "Researching",
                   "story_points": 2,
                   "dependencies": [
                     "P1.M4.T2.S1",

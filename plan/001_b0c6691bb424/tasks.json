@@ -1,0 +1,570 @@
+{
+  "backlog": [
+    {
+      "type": "Phase",
+      "id": "P1",
+      "title": "Stop Thinking & Do — Production MVP",
+      "status": "Researching",
+      "description": "Build a Pi extension that intercepts z.ai reasoning streams at the streamSimple provider boundary, allowing users to press a keyboard shortcut to abort reasoning and immediately transition to answer generation with thinking disabled — while Pi observes a single uninterrupted AssistantMessageEventStream. The extension decorates (does not replace) Pi's built-in openai-completions provider and activates only for z.ai reasoning models.",
+      "milestones": [
+        {
+          "type": "Milestone",
+          "id": "P1.M1",
+          "title": "Phase 0 — Foundation: Observationally-Equivalent Provider Decorator",
+          "status": "Planned",
+          "description": "Create the extension skeleton, configuration, diagnostics, and provider capture/delegation infrastructure that performs ZERO behavioral changes. All requests must behave identically with the extension installed.",
+          "tasks": [
+            {
+              "type": "Task",
+              "id": "P1.M1.T1",
+              "title": "Project Scaffold & Build Tooling",
+              "status": "Planned",
+              "description": "Create the TypeScript project structure with package.json, tsconfig.json, Bun test configuration, and directory layout following the pi-extension package conventions.",
+              "subtasks": [
+                {
+                  "type": "Subtask",
+                  "id": "P1.M1.T1.S1",
+                  "title": "package.json, tsconfig.json, and project structure",
+                  "status": "Planned",
+                  "story_points": 1,
+                  "dependencies": [],
+                  "prd_selectors": ["h1.69/h2.154", "h1.115"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: Pi extensions are npm packages with keywords ['pi-package','pi-extension']. Entry point is the default export factory function (see plan/001_b0c6691bb424/architecture/external_deps.md §4). The pi-zai-usage extension uses 'type':'module', 'main':'./dist/index.js', tsc build to ./dist/, and bun test. Peer dependencies are @earendil-works/pi-ai and @earendil-works/pi-coding-agent.\n2. INPUT: None (greenfield project).\n3. LOGIC: Create package.json with name 'pi-stop-thinking', type 'module', main './dist/index.js', keywords ['pi-package','pi-extension','zai','reasoning'], peerDependencies for @earendil-works/pi-ai and @earendil-works/pi-coding-agent. Create tsconfig.json targeting ES2022 with strict mode, bundler moduleResolution, outDir './dist', declaration:true. Create src/ directory structure: index.ts (entry), provider/ (decorator, proxy), state/ (controller, coordinator), buffer/, shortcut/, request/, config/, diagnostics/, types.ts. Create tests/ directory. Add build script 'tsc' and test script 'bun test'.\n4. OUTPUT: A compilable TypeScript project that imports from @earendil-works/pi-ai and @earendil-works/pi-coding-agent without errors. Consumed by P1.M1.T2.S1 through P1.M1.T5.S1.\n5. DOCS: [Mode A] Create README.md skeleton with extension name, description, and 'Under Development' notice. Update package.json description field."
+                }
+              ]
+            },
+            {
+              "type": "Task",
+              "id": "P1.M1.T2",
+              "title": "Configuration Module",
+              "status": "Planned",
+              "description": "Implement the Configuration module with the config schema from PRD §47/Appendix K, deterministic defaults, and validation that falls back to defaults on invalid input.",
+              "subtasks": [
+                {
+                  "type": "Subtask",
+                  "id": "P1.M1.T2.S1",
+                  "title": "Config type, defaults, and validation",
+                  "status": "Planned",
+                  "story_points": 2,
+                  "dependencies": ["P1.M1.T1.S1"],
+                  "prd_selectors": ["h1.66", "h1.116", "h1.115"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: PRD §47 and Appendix K define the config schema. Config is validated during init; invalid config falls back to defaults and NEVER prevents normal provider delegation (Appendix K Configuration Validation Rules).\n2. INPUT: Optional partial config object (from pi.registerFlag or environment). No external dependencies.\n3. LOGIC: Implement Config type with fields: enabled (boolean, default true), shortcut (string, default 'ctrl+.'), supportedProviders (string[], default ['zai']), transitionTimeoutMs (number, default 5000), replacementStartupTimeoutMs (number, default 10000), maximumReasoningBufferBytes (number, default 8388608), telemetryEnabled (boolean, default false), diagnosticsLevel (default 'error'). Implement loadConfig(partial?: Partial<Config>): Config that merges partial over defaults. Implement validateConfig(config: unknown): Config that validates types and ranges, falling back to defaults for any invalid field. Defaults must be immutable (frozen object).\n4. OUTPUT: Exported Config interface, DEFAULT_CONFIG frozen constant, loadConfig() and validateConfig() functions. Consumed by P1.M1.T4 (ProviderDecorator activation checks), P1.M4.T3 (ShortcutManager shortcut key), P1.M8.T1 (Telemetry).\n5. DOCS: [Mode A] Add JSDoc to Config interface and each field documenting its purpose and default value."
+                }
+              ]
+            },
+            {
+              "type": "Task",
+              "id": "P1.M1.T3",
+              "title": "Diagnostics Module",
+              "status": "Planned",
+              "description": "Implement structured logging that never modifies runtime behavior. Supports trace/debug/info/warn/error levels, disabled by default.",
+              "subtasks": [
+                {
+                  "type": "Subtask",
+                  "id": "P1.M1.T3.S1",
+                  "title": "Structured logger with privacy controls",
+                  "status": "Planned",
+                  "story_points": 1,
+                  "dependencies": ["P1.M1.T2.S1"],
+                  "prd_selectors": ["h1.55/h2.133", "h1.76", "h1.113/h2.201"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: PRD §36 and §57 define diagnostic levels (disabled/errors/verbose/trace) and logging rules. PRD Appendix H §Logging Rules defines what MAY be logged (provider, model, transitionId, timing, event counts, state transitions) and what MUST NEVER be logged (prompts, reasoning, assistant output, API keys, tool args).\n2. INPUT: Config.diagnosticsLevel from P1.M1.T2.S1.\n3. LOGIC: Implement createDiagnostics(level: DiagnosticsLevel) returning an object with trace/debug/info/warn/error methods. Each method takes (event: string, fields?: Record<string, unknown>) and formats structured JSON log lines. Messages below the configured level are silently dropped. The logger should use console.error for warn/error and console.log for debug/info/trace (or a configurable sink). Implement level ordering: error < warn < info < debug < trace.\n4. OUTPUT: Diagnostics object consumed by all other modules. Created once in the extension factory and passed by reference.\n5. DOCS: [Mode A] Add JSDoc documenting privacy rules: 'NEVER log prompt text, reasoning, assistant output, or API keys'. Reference PRD Appendix H."
+                }
+              ]
+            },
+            {
+              "type": "Task",
+              "id": "P1.M1.T4",
+              "title": "Provider Decorator: Capture and Transparent Delegation",
+              "status": "Planned",
+              "description": "Implement the ProviderDecorator that captures the built-in openai-completions provider via getApiProvider(), creates a wrapper streamSimple that delegates transparently, and registers the wrapper via registerApiProvider(). This must produce zero behavioral changes.",
+              "subtasks": [
+                {
+                  "type": "Subtask",
+                  "id": "P1.M1.T4.S1",
+                  "title": "Provider capture and wrapper registration",
+                  "status": "Planned",
+                  "story_points": 2,
+                  "dependencies": ["P1.M1.T2.S1", "P1.M1.T3.S1"],
+                  "prd_selectors": ["h1.29/h2.57", "h1.29/h2.58", "h1.29/h2.59", "h1.29/h2.60", "h1.29/h2.61", "h1.29/h2.62", "h1.29/h2.63", "h1.19", "h1.47"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: pi-ai's api-registry.js exports registerApiProvider(provider, sourceId), getApiProvider(api), and unregisterApiProviders(sourceId). The streamSimple flow is: Pi calls streamSimple(model,context,opts) → resolveApiProvider(model.api) → provider.streamSimple(). z.ai models have api='openai-completions', provider='zai', reasoning=true. The wrapper MUST capture getApiProvider('openai-completions') BEFORE calling registerApiProvider to prevent infinite recursion (PRD §19.2). See plan/001_b0c6691bb424/architecture/system_context.md §Provider Decoration Architecture.\n2. INPUT: Config from P1.M1.T2.S1, Diagnostics from P1.M1.T3.S1.\n3. LOGIC: Implement ProviderDecorator with initialize() and shutdown(). initialize(): (a) const original = getApiProvider('openai-completions'); throw if not found. (b) Create wrapperStreamSimple(model, context, options) that checks activation conditions per PRD §19.5/§19.6: if model.provider NOT in config.supportedProviders → return original.streamSimple(model, context, options). If !model.reasoning → delegate. If !config.enabled → delegate. Otherwise → ALSO delegate for now (StreamProxy is built in M2). The wrapper must be wrapped to match the api check that api-registry.js's wrapStreamSimple does. (c) registerApiProvider({api:'openai-completions', stream: wrapper, streamSimple: wrapperSimple}, 'stop-thinking-extension'). shutdown(): unregisterApiProviders('stop-thinking-extension').\n4. OUTPUT: ProviderDecorator class with initialize/shutdown. When initialized, ALL openai-completions requests (z.ai and non-z.ai) flow through the wrapper but produce byte-identical results. Consumed by P1.M1.T5 (extension factory).\n5. MOCKING: In tests, mock registerApiProvider/getApiProvider to avoid mutating global state. Create test doubles that capture the registered wrapper function.\n6. DOCS: [Mode A] Add JSDoc to ProviderDecorator.initialize documenting the capture-before-register ordering requirement and sourceId 'stop-thinking-extension'."
+                }
+              ]
+            },
+            {
+              "type": "Task",
+              "id": "P1.M1.T5",
+              "title": "Extension Factory Entry Point",
+              "status": "Planned",
+              "description": "Wire everything together in the default export factory function that Pi calls on extension load.",
+              "subtasks": [
+                {
+                  "type": "Subtask",
+                  "id": "P1.M1.T5.S1",
+                  "title": "index.ts factory wiring initialization and shutdown",
+                  "status": "Planned",
+                  "story_points": 1,
+                  "dependencies": ["P1.M1.T2.S1", "P1.M1.T3.S1", "P1.M1.T4.S1"],
+                  "prd_selectors": ["h1.69/h2.154", "h1.93", "h1.94"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: Pi extension entry is `export default function(pi: ExtensionAPI): void`. The factory receives ExtensionAPI with on() for events and registerShortcut/registerProvider. EC-012 (extension unloaded) requires cleanup on session_shutdown. See plan/001_b0c6691bb424/architecture/external_deps.md §2.\n2. INPUT: ExtensionAPI from pi-coding-agent. ProviderDecorator from P1.M1.T4.S1. Config from P1.M1.T2.S1.\n3. LOGIC: Implement `export default function stopThinkingExtension(pi: ExtensionAPI): void` that: (a) loads Config via loadConfig(). (b) creates Diagnostics via createDiagnostics(config.diagnosticsLevel). (c) creates ProviderDecorator and calls initialize(). (d) registers pi.on('session_shutdown', () => decorator.shutdown()) for cleanup. (e) Wrap everything in try/catch — any initialization failure must NOT crash Pi; log error and skip decoration (PRD: invalid config never prevents normal provider delegation).\n4. OUTPUT: A working extension that, when installed, transparently delegates all provider requests with zero observable behavioral change. Pi loads it via `npm:pi-stop-thinking` in settings.json packages.\n5. DOCS: [Mode A] Update README.md to document installation instructions: add 'npm:pi-stop-thinking' to ~/.pi/agent/settings.json packages array."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "Milestone",
+          "id": "P1.M2",
+          "title": "Phase 1 — Event Proxy: Transparent StreamProxy with Event Forwarding",
+          "status": "Planned",
+          "description": "Insert the StreamProxy between Pi and the captured provider without changing observable behavior. The proxy forwards all events, validates ordering, and provides the infrastructure for later interruption — but performs no interception yet.",
+          "tasks": [
+            {
+              "type": "Task",
+              "id": "P1.M2.T1",
+              "title": "Shared Type Definitions for Events and State",
+              "status": "Planned",
+              "description": "Define all TypeScript types used across modules: event classification helpers, transition states, and internal proxy interfaces.",
+              "subtasks": [
+                {
+                  "type": "Subtask",
+                  "id": "P1.M2.T1.S1",
+                  "title": "Event classification and transition state types",
+                  "status": "Planned",
+                  "story_points": 1,
+                  "dependencies": ["P1.M1.T1.S1"],
+                  "prd_selectors": ["h1.25/h2.44", "h1.25/h2.45", "h1.57/h2.137", "h1.58", "h1.28"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: AssistantMessageEvent is imported from @earendil-works/pi-ai. It is a discriminated union with types: start, text_start, text_delta, text_end, thinking_start, thinking_delta, thinking_end, toolcall_start, toolcall_delta, toolcall_end, done, error (see plan/001_b0c6691bb424/architecture/external_deps.md §1). PRD §15 defines TransitionState enum: Idle|Delegating|Reasoning|StopRequested|Aborting|Capturing|Restarting|Splicing|Answering|Completed|Failed. PRD §38 defines legal event sequence.\n2. INPUT: None (type definitions only). Re-export AssistantMessageEvent from pi-ai.\n3. LOGIC: Define TransitionState as a string literal union (PRD Appendix F: 'State transitions shall be represented explicitly using discriminated unions'). Define helper type guards: isThinkingEvent(event), isTextEvent(event), isToolCallEvent(event), isTerminalEvent(event) — each checks event.type against the relevant union members. Define ProxyPhase type: 'forwarding' | 'transitioning' | 'splicing'.\n4. OUTPUT: types.ts exporting TransitionState, ProxyPhase, and all type guard functions. Consumed by P1.M2.T2 (StreamProxy), P1.M3 (TransitionController).\n5. DOCS: [Mode A] Add JSDoc to each type guard referencing the PRD §18 event classification table."
+                }
+              ]
+            },
+            {
+              "type": "Task",
+              "id": "P1.M2.T2",
+              "title": "StreamProxy: Transparent Event Forwarding",
+              "status": "Planned",
+          "description": "Implement the StreamProxy that creates a downstream AssistantMessageEventStream, iterates the upstream provider stream, and forwards every event unchanged. No interception logic yet — purely pass-through.",
+              "subtasks": [
+                {
+                  "type": "Subtask",
+                  "id": "P1.M2.T2.S1",
+                  "title": "StreamProxy class with forward-only pipeline",
+                  "status": "Planned",
+                  "story_points": 2,
+                  "dependencies": ["P1.M2.T1.S1", "P1.M1.T3.S1"],
+                  "prd_selectors": ["h1.30", "h1.30/h2.64", "h1.30/h2.65", "h1.30/h2.68", "h1.30/h2.69", "h1.71/h2.163", "h1.20"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: createAssistantMessageEventStream() from pi-ai creates a new stream. The stream has push(event), end(result), [Symbol.asyncIterator](), result(). The proxy must iterate the upstream async iterable and push each event to its own output stream. See plan/001_b0c6691bb424/architecture/system_context.md §AssistantMessageEventStream. PRD §20.5: proxy owns one outbound queue. PRD §20.6: exactly one upstream is authoritative.\n2. INPUT: model: Model<Api>, context: Context, options: SimpleStreamOptions, upstreamStreamFn: (model, context, options) => AssistantMessageEventStream, diagnostics: Diagnostics. From P1.M2.T1.S1 (types).\n3. LOGIC: Implement StreamProxy class. Constructor creates output = createAssistantMessageEventStream() and starts an async method run(). run() calls const upstream = upstreamStreamFn(model, context, options). It iterates `for await (const event of upstream)` and calls output.push(event) for each. On completion (when upstream iterator finishes), the loop exits naturally — the terminal 'done' or 'error' event has already been pushed. Expose getter get output(): AssistantMessageEventStream. No event modification, no suppression, no buffering — pure forwarding.\n4. OUTPUT: StreamProxy class. When used by ProviderDecorator for z.ai models, produces byte-identical output to direct delegation. Consumed by P1.M4 (adds reasoning detection), P1.M5 (adds abort), P1.M7 (adds splicing).\n5. MOCKING: In tests, create a mock upstreamStreamFn that returns a manually-controlled AssistantMessageEventStream. Push events to the mock and verify they appear on the proxy output in the same order.\n6. DOCS: [Mode A] Add JSDoc documenting the single-output invariant (PRD §13.2 Guarantees: exactly one message_start, one message_end, one completed result)."
+                }
+              ]
+            },
+            {
+              "type": "Task",
+              "id": "P1.M2.T3",
+              "title": "Wire StreamProxy into ProviderDecorator for z.ai Models",
+              "status": "Planned",
+              "description": "Update the ProviderDecorator's wrapper to construct a StreamProxy for z.ai reasoning models instead of direct delegation. This changes the internal path but not the observable output.",
+              "subtasks": [
+                {
+                  "type": "Subtask",
+                  "id": "P1.M2.T3.S1",
+                  "title": "Activate StreamProxy for z.ai reasoning models in the wrapper",
+                  "status": "Planned",
+                  "story_points": 1,
+                  "dependencies": ["P1.M2.T2.S1", "P1.M1.T4.S1"],
+                  "prd_selectors": ["h1.29/h2.61", "h1.29/h2.62", "h1.19"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: The wrapper from P1.M1.T4.S1 currently delegates ALL requests to original.streamSimple. Now, for z.ai reasoning models (model.provider === 'zai' && model.reasoning === true && config.enabled), construct a StreamProxy and return proxy.output instead. For all other models, continue direct delegation.\n2. INPUT: ProviderDecorator from P1.M1.T4.S1, StreamProxy from P1.M2.T2.S1.\n3. LOGIC: Update the wrapperStreamSimple function: when activation conditions (PRD §19.6 Conditions A-E) are met, construct `const proxy = new StreamProxy(model, context, options, original.streamSimple, diagnostics)` and return `proxy.output`. Otherwise return `original.streamSimple(model, context, options)`. This is still observationally equivalent because the proxy only forwards events.\n4. OUTPUT: Updated ProviderDecorator where z.ai reasoning model requests flow through StreamProxy transparently. All events are forwarded identically. Consumed by P1.M3 onwards (adds interception logic).\n5. DOCS: none — no user-facing/config/API surface change (internal wiring only)."
+                }
+              ]
+            },
+            {
+              "type": "Task",
+              "id": "P1.M2.T4",
+              "title": "Golden Stream Replay Test Infrastructure",
+              "status": "Planned",
+          "description": "Create the test infrastructure for golden stream replay: capture real provider event sequences and assert byte-for-byte equivalent downstream output through the proxy.",
+              "subtasks": [
+                {
+                  "type": "Subtask",
+                  "id": "P1.M2.T4.S1",
+                  "title": "Golden replay test harness and fixtures",
+                  "status": "Planned",
+                  "story_points": 2,
+                  "dependencies": ["P1.M2.T3.S1"],
+                  "prd_selectors": ["h1.74/h2.178", "h1.74/h2.179", "h1.69/h2.155"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: PRD Phase 1 success criteria: 'Golden stream replay matches Pi output exactly.' PRD §55 defines Golden Replay Tests: capture real provider event streams, replay through wrapper, assert byte-for-byte equivalent downstream output when inactive.\n2. INPUT: StreamProxy from P1.M2.T2.S1.\n3. LOGIC: Create test helper `replayEvents(events: AssistantMessageEvent[]): AssistantMessageEvent[]` that: (a) creates a mock upstreamStreamFn returning a stream that pushes all events then ends. (b) creates a StreamProxy with that mock. (c) iterates proxy.output and collects all emitted events. (d) returns the collected events. Create fixture data: normal_replay (start → thinking_start → thinking_delta* → thinking_end → text_start → text_delta* → text_end → done), no_reasoning_replay (start → text_start → text_delta* → done), error_replay (start → error). Assert that replayEvents(fixture) deep-equals the fixture.\n4. OUTPUT: Test helpers and fixture files in tests/golden/. This infrastructure is reused by all subsequent milestones for regression testing. Consumed by P1.M7 (full integration tests), P1.M8 (stress tests).\n5. DOCS: none — test infrastructure only."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "Milestone",
+          "id": "P1.M3",
+          "title": "Phase 2 — Transition State Machine: Explicit FSM with Validated Transitions",
+          "status": "Planned",
+          "description": "Implement the TransitionController as an explicit finite-state machine that owns interruption lifecycle state. All transitions must be validated; illegal transitions must be impossible.",
+          "tasks": [
+            {
+              "type": "Task",
+              "id": "P1.M3.T1",
+              "title": "TransitionController FSM Core",
+              "status": "Planned",
+          "description": "Implement the state machine with all states, the transition table, and validation.",
+          "subtasks": [
+                {
+                  "type": "Subtask",
+                  "id": "P1.M3.T1.S1",
+                  "title": "TransitionController class with state table and validation",
+                  "status": "Planned",
+                  "story_points": 2,
+                  "dependencies": ["P1.M2.T1.S1", "P1.M1.T3.S1"],
+                  "prd_selectors": ["h1.25", "h1.26", "h1.27", "h1.49", "h1.21/h2.38", "h1.120"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: PRD §15 defines 11 states. PRD §16 defines the transition table (Current → Event → Next). PRD §17 defines per-state invariants. PRD §37 Concurrency: TransitionController owns transition state (single writer). PRD Appendix F: states must be discriminated unions, not boolean flags.\n2. INPUT: TransitionState type from P1.M2.T1.S1, Diagnostics from P1.M1.T3.S1.\n3. LOGIC: Implement TransitionController class with: private state: TransitionState = 'Idle'. Define ALLOWED_TRANSITIONS: Map<TransitionState, Set<TransitionState>> from PRD §16 table (Idle→Delegating, Delegating→Reasoning, Reasoning→StopRequested, StopRequested→Aborting, Aborting→Capturing, Capturing→Restarting, Restarting→Splicing, Splicing→Answering, Answering→Completed, Completed→Idle, Failed→Idle, Any→Failed). Implement transition(next: TransitionState): void that checks if next is allowed from current state; throws Error if not (with diagnostic). Implement getState(): TransitionState. Implement convenience methods: canInterrupt() (returns state === 'Reasoning'), requestStop() (transitions Reasoning→StopRequested, returns true; returns false otherwise), beginAbort(), completeAbort(), beginReplacement(), beginSplice(), beginAnswering(), complete(), fail(reason), reset(). Each transition logs to diagnostics.trace().\n4. OUTPUT: TransitionController class enforcing PRD §16 transition table. Illegal transitions throw errors. Consumed by StreamProxy (P1.M4) and TransitionCoordinator.\n5. MOCKING: Unit test by calling transition methods in valid and invalid sequences. Assert that calling requestStop() from Idle returns false. Assert that Aborting→Restarting (skipping Capturing) throws.\n6. DOCS: [Mode A] Add JSDoc referencing PRD §16 transition table for each transition method."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "Milestone",
+          "id": "P1.M4",
+          "title": "Phase 3 — Reasoning Detection: Buffer, Shortcut, and Coordinator",
+          "status": "Planned",
+          "description": "Implement reasoning event detection within the StreamProxy, the ReasoningBuffer for capturing thinking deltas, the ShortcutManager for keyboard input, and the TransitionCoordinator that bridges them.",
+          "tasks": [
+            {
+              "type": "Task",
+              "id": "P1.M4.T1",
+              "title": "ReasoningBuffer Module",
+              "status": "Planned",
+          "description": "Append-only buffer that captures reasoning events before interruption, tracks ordering and offsets, and exposes an immutable snapshot after freeze.",
+              "subtasks": [
+                {
+                  "type": "Subtask",
+                  "id": "P1.M4.T1.S1",
+                  "title": "ReasoningBuffer append-only collection with freeze/snapshot",
+                  "status": "Planned",
+                  "story_points": 2,
+                  "dependencies": ["P1.M2.T1.S1", "P1.M1.T3.S1"],
+                  "prd_selectors": ["h1.33", "h1.22", "h1.52", "h1.60", "h1.64"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: PRD §23: buffer is append-only, ordered, immutable after capture. PRD §45: memory proportional only to captured reasoning. PRD §41: buffer ownership transitions: mutable before interruption → frozen after interruption → read-only after replacement → destroyed after completion. PRD §13.4: buffer does NOT interpret reasoning.\n2. INPUT: thinking_delta events from the upstream stream (contentIndex, delta string, partial AssistantMessage).\n3. LOGIC: Implement ReasoningBuffer class. Internal: entries: ThinkingEntry[] where ThinkingEntry = { offset: number; timestamp: number; content: string }. frozen: boolean = false. totalBytes: number = 0. Methods: append(delta: string): void (throws if frozen; pushes {offset: entries.length, timestamp: Date.now(), content: delta}; totalBytes += delta.length). freeze(): void (sets frozen = true). snapshot(): readonly ThinkingEntry[] (returns Object.freeze copy of entries). getByteSize(): number. reset(): void (clears entries, unfreezes, resets bytes). If totalBytes would exceed config.maximumReasoningBufferBytes, do NOT truncate in MVP (PRD §23.5) but log warning.\n4. OUTPUT: ReasoningBuffer class. Consumed by StreamProxy (P1.M4.T2 appends reasoning deltas; P1.M5 freezes on abort) and RequestBuilder (P1.M6 reads snapshot).\n5. DOCS: [Mode A] Add JSDoc documenting lifecycle states (mutable → frozen → destroyed) per PRD §41."
+                }
+              ]
+            },
+            {
+              "type": "Task",
+              "id": "P1.M4.T2",
+              "title": "Reasoning Detection Logic in StreamProxy",
+              "status": "Planned",
+          "description": "Add reasoning state tracking to the StreamProxy event loop: detect thinking_start/thinking_delta/thinking_end/text_start, drive the TransitionController state, and populate the ReasoningBuffer.",
+              "subtasks": [
+                {
+                  "type": "Subtask",
+                  "id": "P1.M4.T2.S1",
+                  "title": "StreamProxy reasoning event tracking and state transitions",
+                  "status": "Planned",
+                  "story_points": 2,
+                  "dependencies": ["P1.M2.T2.S1", "P1.M3.T1.S1", "P1.M4.T1.S1"],
+                  "prd_selectors": ["h1.32", "h1.32/h2.78", "h1.32/h2.79", "h1.32/h2.80", "h1.70/h2.163", "h1.25"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: PRD §22: reasoning enters on thinking_start OR first thinking_delta (PRD §22.3). Reasoning leaves on thinking_end, first text token, or provider completion (PRD §22.4). The StreamProxy's run() loop already forwards events (from P1.M2.T2.S1). Now it must also drive state transitions.\n2. INPUT: StreamProxy from P1.M2.T2.S1, TransitionController from P1.M3.T1.S1, ReasoningBuffer from P1.M4.T1.S1.\n3. LOGIC: Update StreamProxy.run() event loop. Before forwarding each event, check its type: On 'start' event → transitionController.transition('Delegating'). On first 'thinking_start' or 'thinking_delta' → if controller.getState() === 'Delegating', transition to 'Reasoning'. On 'thinking_delta' → if reasoning, append delta.text to reasoningBuffer. On 'thinking_end' → transition out of reasoning (reasoning complete). On first 'text_start' or 'toolcall_start' → reasoning has ended; if state is 'Reasoning', this is normal completion path. On 'done'/'error' → transition to 'Completed'/'Failed' then 'Idle'. The forwarding behavior is UNCHANGED — all events still go to output.push(). This only adds side-effect tracking.\n4. OUTPUT: Updated StreamProxy that tracks reasoning state and populates buffer while still forwarding all events transparently. Consumed by P1.M4.T4 (TransitionCoordinator queries reasoning state).\n5. MOCKING: In tests, replay thinking event sequences and verify TransitionController reaches 'Reasoning' state and buffer accumulates deltas.\n6. DOCS: none — internal logic, no user-facing surface change."
+                }
+              ]
+            },
+            {
+              "type": "Task",
+              "id": "P1.M4.T3",
+              "title": "ShortcutManager Module",
+              "status": "Planned",
+          "description": "Register the configurable keyboard shortcut via pi.registerShortcut and forward stop requests to the TransitionCoordinator. Idempotent: duplicate presses during one transition are ignored.",
+              "subtasks": [
+                {
+                  "type": "Subtask",
+                  "id": "P1.M4.T3.S1",
+                  "title": "ShortcutManager with idempotent stop request forwarding",
+                  "status": "Planned",
+                  "story_points": 1,
+                  "dependencies": ["P1.M1.T2.S1"],
+                  "prd_selectors": ["h1.34", "h1.34/h2.86", "h1.34/h2.87", "h1.34/h2.88", "h1.34/h2.89", "h1.23", "h1.52", "h1.90", "h1.91"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: ExtensionAPI.registerShortcut(shortcut: KeyId, { description, handler }) registers a keyboard shortcut. KeyId is a string like 'ctrl+.'. The handler receives ExtensionContext. PRD §24: stop signal is a REQUEST not a command — the state machine decides. PRD §24.3: multiple presses treated as one (first press wins). PRD §33 ShortcutManager: active only during reasoning, disabled after transition begins, idempotent.\n2. INPUT: ExtensionAPI (pi), config.shortcut string, and TransitionCoordinator (from P1.M4.T4).\n3. LOGIC: Implement ShortcutManager with register(pi, shortcut, coordinator) that calls pi.registerShortcut(shortcut, { description: 'Stop Thinking & Do', handler: () => coordinator.requestStop() }). The coordinator.requestStop() itself enforces idempotency (checks if already transitioning). No local state needed — the coordinator is the authority. Also handle EC-010 (key held down / auto-repeat): the handler does nothing if coordinator.alreadyInterrupting().\n4. OUTPUT: ShortcutManager wired into the extension factory. When user presses ctrl+. during reasoning, coordinator.requestStop() is called. Consumed by P1.M1.T5 (factory wires it).\n5. DOCS: [Mode A] Add JSDoc documenting that the shortcut is configurable via config.shortcut and defaults to 'ctrl+.'."
+                }
+              ]
+            },
+            {
+              "type": "Task",
+              "id": "P1.M4.T4",
+              "title": "TransitionCoordinator Bridge Module",
+              "status": "Planned",
+          "description": "Bridge between ShortcutManager (shortcut handler) and StreamProxy (active proxy instance). Holds a reference to the currently active proxy and delegates stop requests.",
+          "subtasks": [
+                {
+                  "type": "Subtask",
+                  "id": "P1.M4.T4.S1",
+                  "title": "TransitionCoordinator with active proxy delegation",
+                  "status": "Planned",
+                  "story_points": 2,
+                  "dependencies": ["P1.M4.T2.S1", "P1.M4.T3.S1"],
+                  "prd_selectors": ["h1.21/h2.38", "h1.23", "h1.56/h2.135", "h1.70/h2.164"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: The shortcut handler runs in ExtensionContext scope, while the StreamProxy runs inside streamSimple. They need a shared bridge. PRD §37 Concurrency: each module owns its state. The coordinator is NOT a state owner — it holds a reference to the active proxy and delegates. Only one active proxy exists per logical assistant response (PRD INV-004: at most one interruption per response).\n2. INPUT: StreamProxy instances register themselves; ShortcutManager calls requestStop().\n3. LOGIC: Implement TransitionCoordinator class. Private: activeProxy: StreamProxy | undefined = undefined. Methods: setActiveProxy(proxy | undefined): void (called by ProviderDecorator wrapper when a proxy starts/ends). requestStop(): boolean (if activeProxy exists and activeProxy.canInterrupt() returns true, calls activeProxy.triggerStop() and returns true; otherwise returns false). isReasoning(): boolean (delegates to activeProxy?.isReasoning() ?? false). alreadyInterrupting(): boolean (delegates to activeProxy?.isInterrupting() ?? false). The coordinator does NOT own transition state — it queries the proxy which queries its TransitionController.\n4. OUTPUT: TransitionCoordinator singleton created in the extension factory. Consumed by ShortcutManager (P1.M4.T3) and ProviderDecorator (P1.M2.T3). The coordinator is passed to the factory closure and shared between all components.\n5. DOCS: none — internal coordination, no user-facing surface."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "Milestone",
+          "id": "P1.M5",
+          "title": "Phase 4 — Abort Coordination: Safe Upstream Termination",
+          "status": "Planned",
+          "description": "Implement the abort mechanism that safely terminates the upstream reasoning stream when the user requests Stop Thinking. The proxy creates an internal AbortController, dispatches abort, waits for upstream exit, and freezes the reasoning buffer.",
+          "tasks": [
+            {
+              "type": "Task",
+              "id": "P1.M5.T1",
+              "title": "Internal AbortController Management and Upstream Abort",
+              "status": "Planned",
+          "description": "Implement the abort coordination: create an internal AbortController that wraps Pi's signal, dispatch abort when Stop is requested, and handle the upstream stream's abort error gracefully.",
+          "subtasks": [
+                {
+                  "type": "Subtask",
+                  "id": "P1.M5.T1.S1",
+                  "title": "AbortController wrapper and upstream stream abort handling",
+                  "status": "Planned",
+                  "story_points": 2,
+                  "dependencies": ["P1.M4.T2.S1", "P1.M4.T4.S1"],
+                  "prd_selectors": ["h1.70/h2.165", "h1.31/h2.73", "h1.31/h2.74", "h1.62", "h1.64", "h1.69/h2.158"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: SimpleStreamOptions has a signal?: AbortSignal field. Pi passes its own abort signal (for user escape/ctrl+c). The proxy must create its OWN internal AbortController for the upstream stream so it can abort the reasoning stream WITHOUT aborting Pi's overall request. The upstream stream's async iterator will throw an abort error when aborted — this must be caught (PRD FM-006: provider ignores abort → timeout; FM-005: abort races completion).\n2. INPUT: StreamProxy from P1.M4.T2.S1, options.signal (Pi's AbortSignal).\n3. LOGIC: In StreamProxy constructor, create internalAbort = new AbortController(). Create a combined signal: if options.signal exists, listen for its abort and propagate to internalAbort (so Pi's escape still works). Pass { ...options, signal: internalAbort.signal } to upstreamStreamFn. Add triggerStop() method: (a) check controller.canInterrupt() — if false, return false. (b) controller.requestStop(). (c) controller.beginAbort(). (d) internalAbort.abort(). (e) The run() loop's `for await` will catch the abort error in a try/catch — when caught during 'Aborting' state, this is expected; transition to 'Capturing'. (f) reasoningBuffer.freeze(). (g) Return true. Add abort timeout (config.transitionTimeoutMs): if upstream doesn't close within timeout, transition to 'Failed'.\n4. OUTPUT: StreamProxy can abort the upstream stream on demand. The abort is graceful: reasoning is frozen, state transitions Aborting→Capturing. Consumed by P1.M6 (replacement request starts after Capturing).\n5. MOCKING: In tests, create a mock upstream that emits thinking deltas slowly, then trigger stop, verify the mock stream receives abort and the buffer is frozen.\n6. DOCS: none — internal mechanism."
+                }
+              ]
+            },
+            {
+              "type": "Task",
+              "id": "P1.M5.T2",
+              "title": "Abort-vs-Completion Race Handling",
+              "status": "Planned",
+          "description": "Handle the race condition where the upstream stream completes naturally while or just after abort is dispatched (PRD FM-005, EC-007, RC-001). Natural completion wins.",
+          "subtasks": [
+                {
+                  "type": "Subtask",
+                  "id": "P1.M5.T2.S1",
+                  "title": "Race detection: completion wins over abort",
+                  "status": "Planned",
+                  "story_points": 1,
+                  "dependencies": ["P1.M5.T1.S1"],
+                  "prd_selectors": ["h1.61/h2.143", "h1.88", "h1.102"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: PRD FM-005: 'If provider already completed, transition cancelled. Normal completion continues.' EC-007: 'Natural completion wins. Replacement request cancelled.' RC-001: 'Winner: First terminal state observed.' The race occurs because abort() is dispatched asynchronously while the upstream stream may emit its terminal 'done' event concurrently.\n2. INPUT: StreamProxy from P1.M5.T1.S1 with abort handling.\n3. LOGIC: In the StreamProxy.run() loop, when catching an error from the upstream iterator OR when the loop completes naturally: Check if a 'done' or 'error' event was already received from upstream before abort took effect. If the upstream emitted its terminal event before the abort error was thrown, the stream completed naturally — cancel the transition: reset TransitionController to 'Completed' then 'Idle', forward the terminal event normally, do NOT start a replacement request. If the abort error was thrown without a preceding terminal event, proceed with the transition (Capturing → Restarting). Use a flag `upstreamCompleted` set when a 'done'/'error' event is forwarded.\n4. OUTPUT: Robust race handling where natural completion always wins over abort. Consumed by P1.M6 and P1.M7.\n5. MOCKING: Test by creating a mock upstream that emits 'done' then closes, with abort dispatched concurrently. Verify output has the original 'done' event, not a replacement.\n6. DOCS: none — internal correctness logic."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "Milestone",
+          "id": "P1.M6",
+          "title": "Phase 5 — Replacement Generation: Thinking-Disabled Request",
+          "status": "Planned",
+          "description": "Implement the RequestBuilder that constructs a replacement provider request with reasoning disabled, and invoke it through the captured built-in provider.",
+          "tasks": [
+            {
+              "type": "Task",
+              "id": "P1.M6.T1",
+              "title": "RequestBuilder Module",
+              "status": "Planned",
+          "description": "Construct the replacement request: same model, same conversation context, same sampling parameters, but with reasoning disabled (reasoning: undefined for z.ai).",
+          "subtasks": [
+                {
+                  "type": "Subtask",
+                  "id": "P1.M6.T1.S1",
+                  "title": "RequestBuilder with thinking-disabled transformation",
+                  "status": "Planned",
+                  "story_points": 2,
+                  "dependencies": ["P1.M4.T1.S1"],
+                  "prd_selectors": ["h1.35", "h1.35/h2.90", "h1.35/h2.91", "h1.35/h2.92", "h1.35/h2.93", "h1.35/h2.94", "h1.35/h2.95", "h1.35/h2.96", "h1.35/h2.97", "h1.36", "h1.72", "h1.50"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: For z.ai models with thinkingFormat='zai', the built-in provider sets `params.enable_thinking = !!options?.reasoningEffort`. reasoningEffort comes from `options.reasoning` in streamSimple. If options.reasoning is undefined, reasoningEffort is undefined, so enable_thinking = false → reasoning disabled. See plan/001_b0c6691bb424/architecture/external_deps.md §3 and system_context.md. PRD §53: preserve conversation/user prompt/model/sampling; modify thinking config to disabled; may add ephemeral execution directive; do NOT modify user intent.\n2. INPUT: Original model (Model<Api>), original context (Context), original options (SimpleStreamOptions), frozen reasoningSnapshot from ReasoningBuffer.\n3. LOGIC: Implement RequestBuilder.buildReplacement(model, context, options, reasoningSnapshot): { model, context, options }. Return new options object: { ...options, reasoning: undefined }. This preserves apiKey, temperature, maxTokens, sessionId, headers, etc. while disabling reasoning. The model and context are passed through unchanged (PRD §25.3: context reuse, §25.4: prompt reuse, §25.7: model preserved). The ephemeral execution directive (PRD §53, §25.5) is optional — for MVP, omit it by default. The method is pure (no side effects, no network).\n4. OUTPUT: RequestBuilder.buildReplacement() returning a { model, context, options } triple that can be passed to original.streamSimple(). Consumed by P1.M7.T1 (StreamProxy invokes replacement).\n5. DOCS: [Mode A] Add JSDoc documenting that reasoning is disabled by setting options.reasoning to undefined, which causes enable_thinking=false in z.ai's API payload."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "Milestone",
+          "id": "P1.M7",
+          "title": "Phase 6 — Stream Splicing: Seamless Authority Transfer",
+          "status": "Planned",
+          "description": "Implement the complete stream splicing algorithm: after aborting the primary stream, launch the replacement stream, suppress primary terminal events, transfer authority to the replacement, and forward replacement events — all through the single downstream AssistantMessageEventStream.",
+          "tasks": [
+            {
+              "type": "Task",
+              "id": "P1.M7.T1",
+              "title": "Replacement Stream Invocation and Authority Transfer",
+              "status": "Planned",
+          "description": "After the primary stream is aborted and reasoning is frozen, construct and invoke the replacement request through the captured provider, then begin forwarding replacement events.",
+          "subtasks": [
+                {
+                  "type": "Subtask",
+                  "id": "P1.M7.T1.S1",
+                  "title": "Replacement stream launch and initial event handling",
+                  "status": "Planned",
+                  "story_points": 2,
+                  "dependencies": ["P1.M5.T1.S1", "P1.M6.T1.S1"],
+                  "prd_selectors": ["h1.70/h2.166", "h1.70/h2.167", "h1.31", "h1.59", "h1.31/h2.74", "h1.31/h2.75", "h1.31/h2.76"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: After Capturing state (PRD §16), transition to Restarting. The replacement request is invoked via the SAME captured provider's streamSimple function: original.streamSimple(model, context, replacementOptions). PRD §21.3: splice boundary begins when stop requested, ends when first replacement event accepted. PRD §40: replacement stream becomes authoritative only after primary aborted, reasoning frozen, replacement accepted.\n2. INPUT: StreamProxy from P1.M5.T1.S1 (with abort), RequestBuilder from P1.M6.T1.S1.\n3. LOGIC: In StreamProxy.run(), after the abort is complete (state is 'Capturing'): (a) Call RequestBuilder.buildReplacement(model, context, originalOptions, reasoningBuffer.snapshot()). (b) controller.beginReplacement() → 'Restarting'. (c) Create a NEW internal AbortController for the replacement stream (so Pi's signal still controls it). (d) Call const replacementStream = originalStreamFn(replacementModel, replacementContext, { ...replacementOptions, signal: replacementAbort.signal }). (e) Begin iterating replacementStream. (f) On first replacement event → controller.beginSplice() → 'Splicing'. (g) Set authority = 'replacement'. (h) Add replacement startup timeout (config.replacementStartupTimeoutMs): if no first event within timeout, transition to 'Failed'.\n4. OUTPUT: StreamProxy can launch and begin consuming a replacement stream after aborting the primary. Consumed by P1.M7.T2 (splicing logic) and P1.M7.T3 (event filtering).\n5. MOCKING: Test with mock primary that emits thinking events, trigger stop, then mock replacement that emits text events. Verify replacement stream is invoked with reasoning: undefined.\n6. DOCS: none — internal orchestration."
+                }
+              ]
+            },
+            {
+              "type": "Task",
+              "id": "P1.M7.T2",
+              "title": "Terminal Event Suppression and Replacement Forwarding",
+              "status": "Planned",
+          "description": "Suppress terminal events (done/error) from the primary stream and forward replacement stream events to the output. Ensure exactly one terminal event reaches Pi.",
+          "subtasks": [
+                {
+                  "type": "Subtask",
+                  "id": "P1.M7.T2.S1",
+                  "title": "Event filtering: suppress primary terminal, forward replacement events",
+                  "status": "Planned",
+                  "story_points": 2,
+                  "dependencies": ["P1.M7.T1.S1"],
+                  "prd_selectors": ["h1.28", "h1.58", "h1.39", "h1.70/h2.167", "h1.120", "h1.31/h2.76", "h1.120"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: PRD §18 Event Forwarding Rules: after restart, message_start is 'Already emitted', thinking_* 'Never emit', text_* 'Forward', done/error 'Forward replacement'. PRD §21.6: exactly one stream owns completion — always the replacement after interruption. PRD §13.2 INVARIANT: exactly one message_start and one message_end. PRD FM-014: unexpected duplicate completion → suppress duplicate.\n2. INPUT: StreamProxy from P1.M7.T1.S1.\n3. LOGIC: Track which events have been emitted: messageStartEmitted (boolean), messageEndEmitted (boolean). In the forwarding logic: If authority === 'primary' (before interruption): forward all events normally, set messageStartEmitted on 'start' event. If authority === 'replacement' (after splice): SKIP 'start' event (already emitted). SKIP all 'thinking_*' events (never emit after restart, PRD §18). Forward 'text_start', 'text_delta', 'text_end' events. Forward 'toolcall_*' events. On 'done' or 'error' from replacement → forward it and set messageEndEmitted, then output.end(result). Any terminal event from the PRIMARY stream after authority transfer → discard silently (PRD FM-015: discard silently, log trace). If a duplicate terminal event somehow arrives → suppress (PRD FM-014).\n4. OUTPUT: StreamProxy produces exactly one start event and one terminal event from the combined primary+replacement streams. Consumed by P1.M7.T3.\n5. MOCKING: Test full interruption cycle: mock primary emits start + thinking events, trigger stop, mock replacement emits start (suppressed) + text events + done (forwarded). Verify output has exactly one start and one done.\n6. DOCS: none — internal event routing."
+                }
+              ]
+            },
+            {
+              "type": "Task",
+              "id": "P1.M7.T3",
+              "title": "Full Transition Algorithm Integration",
+              "status": "Planned",
+          "description": "Integrate all components into the complete Stop Thinking lifecycle: from idle through reasoning → abort → replacement → splicing → answering → completion. Verify the full state machine cycle.",
+          "subtasks": [
+                {
+                  "type": "Subtask",
+                  "id": "P1.M7.T3.S1",
+                  "title": "End-to-end transition lifecycle and cleanup",
+                  "status": "Planned",
+                  "story_points": 2,
+                  "dependencies": ["P1.M7.T2.S1", "P1.M4.T4.S1"],
+                  "prd_selectors": ["h1.70", "h1.69/h2.166", "h1.69/h2.168", "h1.63", "h1.27/h2.55", "h1.27/h2.56", "h1.64", "h1.67"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: PRD §51 Complete Transition Algorithm defines the full lifecycle. PRD §44 Resource Management: every completion releases reasoning buffer, abort controller, proxy queue, transition token. PRD §17 Completed/Failed invariants: cleanup must succeed even if telemetry fails. The coordinator.setActiveProxy(undefined) must be called on cleanup.\n2. INPUT: All modules from P1.M3-P1.M7.\n3. LOGIC: Wire the full lifecycle in StreamProxy.run(): After the replacement stream's terminal event is forwarded (P1.M7.T2): (a) controller.complete() → 'Completed' → 'Idle'. (b) cleanup(): destroy reasoningBuffer (reset), null out abort controllers, coordinator.setActiveProxy(undefined). (c) If any error occurred during transition: controller.fail(reason) → 'Failed' → cleanup → forward error event to output. Ensure cleanup runs exactly once (PRD INV-010). Ensure no resources survive beyond stream completion (PRD §44). Verify all PRD §48 Acceptance Criteria: one logical assistant interaction, no visible restart, no additional user prompt, no duplicate turn.\n4. OUTPUT: Complete, working Stop Thinking transition from user keypress to final answer. This is the MVP feature fully functional. Consumed by P1.M8 (hardening, testing, docs).\n5. MOCKING: Integration test with mock provider that emits reasoning, then replacement text, simulating the full user story from PRD §7 Story 1.\n6. DOCS: none — integration logic."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "Milestone",
+          "id": "P1.M8",
+          "title": "Phase 7 — Hardening: Telemetry, Failure Modes, Stress Testing, Documentation",
+          "status": "Planned",
+          "description": "Add production hardening: telemetry metrics, comprehensive failure mode handling (FM-001 through FM-015), edge case coverage (EC-001 through EC-020), stress/chaos testing, performance optimization, and final documentation.",
+          "tasks": [
+            {
+              "type": "Task",
+              "id": "P1.M8.T1",
+              "title": "Telemetry Module",
+              "status": "Planned",
+          "description": "Implement structured telemetry recording that captures transition metrics without affecting functionality. All telemetry failures are silently ignored.",
+          "subtasks": [
+                {
+                  "type": "Subtask",
+                  "id": "P1.M8.T1.S1",
+                  "title": "Telemetry recorder with privacy-safe metrics",
+                  "status": "Planned",
+                  "story_points": 2,
+                  "dependencies": ["P1.M7.T3.S1"],
+                  "prd_selectors": ["h1.54/h2.130", "h1.54/h2.131", "h1.54/h2.132", "h1.75", "h1.114"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: PRD §35 Telemetry: records operational metrics, must never affect functionality. PRD Appendix I defines telemetry schema: TransitionStarted (transitionId, provider, model, timestamp, reasoningElapsedMs), TransitionCompleted (transitionId, abortLatencyMs, restartLatencyMs, spliceLatencyMs, completionLatencyMs, totalDurationMs, success), TransitionFailed (transitionId, failureCategory, failurePhase, provider, model, timestamp). Performance counters: RequestsDelegated, TransitionsRequested, TransitionsCompleted, TransitionsFailed, IgnoredShortcutPresses, AverageTransitionLatency. PRD §56/Appendix H: NEVER log prompts, reasoning, or output.\n2. INPUT: Config.telemetryEnabled from P1.M1.T2.S1. Timing data from TransitionController.\n3. LOGIC: Implement Telemetry class with: recordTransitionStarted(fields), recordTransitionCompleted(fields), recordTransitionFailed(fields), incrementCounter(name). All methods are no-ops if !config.telemetryEnabled. All methods wrap in try/catch (PRD §35: telemetry failures are ignored). Maintain internal counters Map<string, number>. Methods record timestamps and durations. The telemetry data is logged via diagnostics at 'info' level (structured JSON).\n4. OUTPUT: Telemetry module consumed by StreamProxy (records transition lifecycle events) and ShortcutManager (records ignored presses). Consumed by P1.M8.T2 (failure mode telemetry).\n5. DOCS: [Mode A] Add JSDoc to Telemetry class documenting all metric fields and the privacy constraints (no prompt/reasoning/output logging)."
+                }
+              ]
+            },
+            {
+              "type": "Task",
+              "id": "P1.M8.T2",
+              "title": "Failure Mode Handling (FM-001 through FM-015)",
+              "status": "Planned",
+          "description": "Implement detection and recovery for all 15 failure modes defined in PRD §42 and all edge cases from Appendix B.",
+          "subtasks": [
+                {
+                  "type": "Subtask",
+                  "id": "P1.M8.T2.S1",
+                  "title": "Shortcut timing failure modes and edge cases",
+                  "status": "Planned",
+                  "story_points": 2,
+                  "dependencies": ["P1.M7.T3.S1"],
+                  "prd_selectors": ["h1.61/h2.139", "h1.61/h2.140", "h1.61/h2.141", "h1.61/h2.142", "h1.82", "h1.83", "h1.84", "h1.85", "h1.86", "h1.90", "h1.91", "h1.96", "h1.97", "h1.98"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: FM-001 (shortcut before stream) → ignore. FM-002 (before reasoning) → ignore. FM-003 (after answer starts) → ignore. FM-004 (repeated presses) → first wins. EC-001 (before first event) → ignore. EC-002 (during network stall) → record pending stop, trigger on first reasoning event. EC-005 (during thinking_end) → ignore. EC-006 (during first answer token) → ignore. EC-009/EC-010 (duplicate/held) → first wins.\n2. INPUT: StreamProxy and TransitionCoordinator from P1.M7.T3.S1.\n3. LOGIC: Verify/implement: (a) requestStop() returns false when controller.getState() is not 'Reasoning' (covers FM-001/002/003, EC-001/005/006). (b) EC-002 pending stop: add `pendingStop: boolean` to TransitionCoordinator; if shortcut pressed during 'Delegating' (no events yet or no reasoning yet), set pendingStop=true; when first reasoning event arrives in StreamProxy, if pendingStop, immediately trigger transition. Clear pendingStop if first event is text (not reasoning). (c) coordinator.alreadyInterrupting() already handles FM-004/EC-009/EC-010 by checking state. (d) EC-016 (feature disabled): wrapper checks config.enabled before constructing proxy. (e) EC-017 (replacement returns reasoning): forward reasoning events from replacement without recursive interruption.\n4. OUTPUT: All shortcut-timing edge cases handled gracefully with no crashes or broken streams. Consumed by P1.M8.T4 (stress testing validates these).\n5. DOCS: none — internal edge case handling."
+                },
+                {
+                  "type": "Subtask",
+                  "id": "P1.M8.T2.S2",
+                  "title": "Provider failure modes and recovery hierarchy",
+                  "status": "Planned",
+                  "story_points": 2,
+                  "dependencies": ["P1.M8.T2.S1"],
+                  "prd_selectors": ["h1.61/h2.144", "h1.61/h2.145", "h1.61/h2.146", "h1.61/h2.147", "h1.61/h2.148", "h1.61/h2.149", "h1.61/h2.150", "h1.61/h2.151", "h1.61/h2.152", "h1.61/h2.153", "h1.73", "h1.88", "h1.89", "h1.99", "h1.100", "h1.101"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: FM-005 (abort races completion) → handled in P1.M5.T2. FM-006 (provider ignores abort) → timeout, preserve normal stream. FM-007 (replacement rejected) → forward error, cleanup. FM-008 (auth failure) → surface auth error. FM-009/010 (network disconnect) → delegate normal failure. FM-011 (replacement terminates immediately) → forward completion. FM-012 (replacement never produces event) → timeout, abort, forward error. FM-013 (malformed event) → forward if possible, else terminate. FM-014 (duplicate completion) → suppress. FM-015 (unexpected upstream after transfer) → discard silently. PRD §54 Recovery Hierarchy: L1 ignore, L2 disable transition, L3 terminate replacement, L4 terminate proxy.\n2. INPUT: StreamProxy from P1.M7.T3.S1.\n3. LOGIC: Implement recovery for each: FM-006: wrap abort dispatch with setTimeout(config.transitionTimeoutMs); on timeout, if upstream still alive, transition to 'Failed', forward original stream's events (stop suppressing). FM-007/008: if replacement stream throws error before first event, transition to 'Failed', forward the error to output, cleanup. FM-012: wrap replacement iteration with setTimeout(config.replacementStartupTimeoutMs); on timeout, abort replacement, forward error. FM-013: in event validation, if event shape is malformed, log diagnostics.warn, attempt to forward with best-effort; if impossible, transition to 'Failed'. FM-014: track messageEndEmitted flag (already in P1.M7.T2); discard duplicate terminals. FM-015: after authority='replacement', any events from primary iterator are discarded with diagnostics.trace. All recovery paths must call cleanup() and coordinator.setActiveProxy(undefined).\n4. OUTPUT: All 15 failure modes have defined detection and recovery. No failure leaves orphaned resources (PRD §54: no recovery path may leave allocated resources orphaned). Consumed by P1.M8.T4.\n5. MOCKING: Test each failure mode individually with controlled mock streams that exhibit the failure condition.\n6. DOCS: none — internal error handling."
+                }
+              ]
+            },
+            {
+              "type": "Task",
+              "id": "P1.M8.T3",
+              "title": "Extension Lifecycle and Re-registration Handling",
+              "status": "Planned",
+          "description": "Handle extension disable/unload/reload scenarios (EC-011 through EC-016) to ensure clean lifecycle management.",
+          "subtasks": [
+                {
+                  "type": "Subtask",
+                  "id": "P1.M8.T3.S1",
+                  "title": "Session shutdown cleanup and provider restoration",
+                  "status": "Planned",
+                  "story_points": 1,
+                  "dependencies": ["P1.M7.T3.S1"],
+                  "prd_selectors": ["h1.93", "h1.92", "h1.94", "h1.95"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: EC-011 (disabled mid-request): current transition continues, future requests bypass wrapper. EC-012 (unloaded mid-transition): wrapper completes active request, provider registration restored, cleanup performed. EC-013 (provider reload): decorator re-registers, captured provider refreshed. The session_shutdown event fires before teardown.\n2. INPUT: ProviderDecorator from P1.M1.T4.S1, ExtensionAPI events.\n3. LOGIC: In the extension factory: (a) Already registered pi.on('session_shutdown', () => decorator.shutdown()) from P1.M1.T5. Verify shutdown() calls unregisterApiProviders('stop-thinking-extension'). (b) EC-011: implement a `disabled` flag in the wrapper; when set (e.g., via pi.registerFlag), the wrapper delegates without constructing proxies for NEW requests; active transitions continue. (c) EC-013: the session_shutdown → shutdown → re-init cycle handles provider reload naturally since initialize() re-captures the current provider.\n4. OUTPUT: Extension handles lifecycle events gracefully. No orphaned registrations after shutdown.\n5. DOCS: none — internal lifecycle handling."
+                }
+              ]
+            },
+            {
+              "type": "Task",
+              "id": "P1.M8.T4",
+              "title": "Stress, Chaos, and Property-Based Testing",
+              "status": "Planned",
+          "description": "Comprehensive testing beyond unit tests: stress tests with thousands of interruptions, chaos tests with random failures, property tests for invariants, and golden replay regression tests.",
+          "subtasks": [
+                {
+                  "type": "Subtask",
+                  "id": "P1.M8.T4.S1",
+                  "title": "Property tests and stress test suite",
+                  "status": "Planned",
+                  "story_points": 2,
+                  "dependencies": ["P1.M8.T2.S2", "P1.M2.T4.S1"],
+                  "prd_selectors": ["h1.74/h2.176", "h1.74/h2.177", "h1.74/h2.180", "h1.74/h2.181", "h1.67"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: PRD §55 defines testing categories. Property Tests (PRD §55): exactly one completion, exactly one authority, no duplicate start, no duplicate end, no leaked buffers. Stress Tests (PRD §55): thousands of interruptions, large reasoning buffers, rapid shortcut presses. PRD Appendix O defines formal invariants INV-001 through INV-012.\n2. INPUT: All modules from P1.M1-P1.M8. Golden replay infrastructure from P1.M2.T4.S1.\n3. LOGIC: Create test suites: (a) property_tests.test.ts: generate random event sequences with random interruption points; assert INV-001 (one downstream stream), INV-002 (one message_start), INV-003 (one message_end), INV-004 (at most one interruption), INV-005 (authority transfer irreversible), INV-010 (cleanup exactly once). (b) stress_tests.test.ts: run 1000 interruption cycles in sequence; verify no memory growth (check process.memoryUsage before/after). Run with large reasoning buffers (1MB+). Rapid-fire shortcut presses (100 in 100ms). (c) chaos_tests.test.ts: inject random errors into mock upstream at random points; verify recovery never produces broken streams. (d) regression_tests.test.ts: replay all golden fixtures through the full wrapper; verify byte-identical output when no interruption occurs.\n4. OUTPUT: Test suite exceeding 100 test cases covering all PRD invariants and failure modes. All must pass before production release.\n5. DOCS: none — test implementation."
+                }
+              ]
+            },
+            {
+              "type": "Task",
+              "id": "P1.M8.T5",
+              "title": "Sync Changeset-Level Documentation",
+              "status": "Planned",
+          "description": "Final documentation task: update README.md with feature overview, installation, configuration, and usage. Create CHANGELOG. Ensure all cross-cutting docs reflect the complete changeset.",
+              "subtasks": [
+                {
+                  "type": "Subtask",
+                  "id": "P1.M8.T5.S1",
+                  "title": "README.md with full feature documentation",
+                  "status": "Planned",
+                  "story_points": 1,
+                  "dependencies": ["P1.M8.T4.S1", "P1.M1.T2.S1", "P1.M1.T5.S1", "P1.M7.T3.S1"],
+                  "prd_selectors": ["h1.0", "h1.13", "h1.66", "h1.67", "h1.115"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: README.md was created as a skeleton in P1.M1.T1.S1. Now update it with full documentation reflecting the completed extension. This is Mode B (changeset-level docs) per SOW §5.\n2. INPUT: All completed subtasks. Config schema from P1.M1.T2.S1.\n3. LOGIC: Write README.md with sections: (a) Title and one-line description ('Stop Thinking & Do — interrupt reasoning loops in z.ai models with one keystroke'). (b) Features list: single keyboard shortcut, transparent provider decoration, zero-config defaults, z.ai-specific. (c) Installation: add 'npm:pi-stop-thinking' to ~/.pi/agent/settings.json packages array. (d) Configuration: document all config fields with defaults (from Appendix K), explain how to override via flags. (e) Usage: press Ctrl+. during reasoning to stop thinking and get an answer. (f) Supported models: list z.ai reasoning models. (g) Architecture overview: brief description of provider decoration and stream splicing. (h) Privacy: state that no prompts/reasoning/output are logged or persisted. (i) Limitations: z.ai only, one interruption per response, no recursive interruption.\n4. OUTPUT: Complete README.md. Create CHANGELOG.md with v1.0.0 entry.\n5. DOCS: [Mode B] This IS the documentation subtask — it updates README.md to surface the complete extension capability."
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

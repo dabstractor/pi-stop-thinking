@@ -60,7 +60,7 @@
           "type": "Milestone",
           "id": "P1.M2",
           "title": "Issue 1 — Reasoning Content Preservation (Critical)",
-          "status": "Planned",
+          "status": "Complete",
           "description": "Fix the CRITICAL defect: on every interruption the reasoning content is silently dropped from the persisted assistant message. The StreamProxy forwards replacement events verbatim, causing (a) a contentIndex collision (primary thinking at [0], replacement text at [0]) and (b) partial switching (the replacement's fresh text-only partial replaces the accumulated reasoning in the agent-loop consumer). The fix: the proxy captures the primary's frozen content blocks at the abort boundary, then REWRITES replacement events — offsetting contentIndex past the primary's blocks and merging each event's partial (and the done message) into a single unified [thinking, text] message. This is the core use-case bug (100% of interruptions).",
           "tasks": [
             {
@@ -133,14 +133,14 @@
               "type": "Task",
               "id": "P1.M2.T3",
               "title": "End-to-end integration test through the real consumer harness",
-              "status": "Planned",
+              "status": "Complete",
               "description": "The regression guard for Issue 1: drive the realistic two-call mock through the StreamProxy, trigger the stop mid-reasoning, and consume the proxy output through the faithful consumeLikeAgentLoop harness — asserting the final persisted message preserves reasoning as [thinking, text], with no restart artifact. This is the test that closes the blind spot the PRD identified.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M2.T3.S1",
                   "title": "Add consumer-harness integration test asserting [thinking, text] preservation end-to-end",
-                  "status": "Planned",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M2.T2.S2",

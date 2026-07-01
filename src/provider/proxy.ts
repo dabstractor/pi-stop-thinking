@@ -644,6 +644,13 @@ export class StreamProxy {
       }
       this._messageEndEmitted = true; // the replacement's terminal is THE downstream terminal (INV-003)
     }
+    // P1.M2.T2.S1 — Issue 1 fix: rewrite NON-TERMINAL replacement events so the consumer unifies the message.
+    // Offset shifts the answer past the frozen reasoning; merge prepends the cloned frozen reasoning to the
+    // partial. Skips terminals (no contentIndex) and offset-0 (no captured primary content → no-op for the
+    // existing suite). EC-017 replacement thinking events fall through here and are rewritten automatically.
+    if (this._contentIndexOffset > 0 && "contentIndex" in event) {
+      event = this._rewriteReplacementEvent(event);
+    }
     // text_start/delta/end + toolcall_* (and the first terminal) → forward.
     this._output.push(event);
   }
@@ -911,6 +918,41 @@ export class StreamProxy {
       clearTimeout(this._replacementStartupTimer);
       this._replacementStartupTimer = undefined;
     }
+  }
+
+  /**
+   * P1.M2.T2.S1 — merge a replacement event's `partial` with the primary's frozen content blocks (Issue 1 fix).
+   * Returns a NEW {@link AssistantMessage}: the replacement's partial (preserving usage/model/stopReason/timestamp)
+   * with `content` = [CLONED frozen primary blocks..., ...replacement's own content blocks]. The frozen blocks are
+   * shallow-cloned per-block to avoid aliasing {@link _frozenPrimaryContent} across events (defensive isolation).
+   * The replacement's own blocks are NOT cloned (they are the replacement's live accumulating blocks — same as the
+   * provider's own `partial` semantics). Seed data is captured by P1.M2.T1.S1; the merge spec is
+   * architecture/pi-ai-event-types.md §2.
+   */
+  private _mergePartial(replacementPartial: AssistantMessage | undefined): AssistantMessage {
+    return {
+      ...replacementPartial,
+      content: [
+        ...this._frozenPrimaryContent.map((b) => ({ ...b })), // CLONED frozen primary blocks (reasoning preserved)
+        ...(replacementPartial?.content ?? []),               // replacement's own (live) answer blocks
+      ],
+    } as AssistantMessage;
+  }
+
+  /**
+   * P1.M2.T2.S1 — rewrite a forwarded replacement NON-terminal event to carry an offset `contentIndex` and a merged
+   * `partial` (Issue 1 fix), so the downstream consumer assembles ONE unified message [primary reasoning, ...answer]:
+   *  - LOCAL consumer (agent-loop.js `partialMessage = event.partial`) → fixed by the MERGED partial (reasoning preserved).
+   *  - REMOTE consumer (proxy.js `partial.content[contentIndex]`) → fixed by the OFFSET contentIndex (answer lands
+   *    AFTER the frozen reasoning, no index-0 collision).
+   * The `in` checks are tsc-safe no-ops at runtime (the call-site gate guarantees `"contentIndex" in event`); they
+   * narrow out the terminal members that lack `contentIndex`/`partial`. This rewrites NON-TERMINAL events ONLY —
+   * the terminal (`done.message`/`error.error`) is handled by P1.M2.T2.S2.
+   */
+  private _rewriteReplacementEvent(event: AssistantMessageEvent): AssistantMessageEvent {
+    const contentIndex = ("contentIndex" in event ? event.contentIndex : 0) + this._contentIndexOffset;
+    const partial = this._mergePartial("partial" in event ? event.partial : undefined);
+    return { ...event, contentIndex, partial } as AssistantMessageEvent;
   }
 
   private makeErrorAssistantMessage(model: Model<Api>, message: string): AssistantMessage {

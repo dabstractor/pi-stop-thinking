@@ -3,6 +3,14 @@
 All notable changes to this project are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Fixed
+
+- Reasoning is now preserved in the persisted assistant message on interruption (content assembles as `[thinking, text]`, matching a normal response) — P1.M2.
+- The shortcut is now disabled once reasoning ends (`thinking_end` or first answer token); pressing it during the answer no longer aborts the in-progress response — P1.M3.
+- Coordinator no longer loses shortcut coverage for overlapping streams (guarded active-proxy clear) — P1.M4.
+
 ## [1.0.0]
 
 ### Added

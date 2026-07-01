@@ -4,7 +4,7 @@
       "type": "Phase",
       "id": "P1",
       "title": "Stream Integrity & Shortcut Lifecycle Bugfix",
-      "status": "Planned",
+      "status": "Complete",
       "description": "Fix the three defects found by validating the extension's output stream against the real pi-agent-core consumer: (1) CRITICAL — reasoning content lost from the persisted assistant message on every interruption (contentIndex collision + partial switching); (2) MAJOR — shortcut remains armed during answer generation, aborting the in-progress answer; (3) MINOR — single coordinator active-proxy slot loses shortcut coverage for overlapping streams. All three are internal changes to src/provider/proxy.ts and src/state/coordinator.ts. No new public API, config flag, or CLI surface. The existing 380-test suite has a blind spot (asserts on raw forwarded events, never runs the real consumer assembly), so a consumer-simulation harness is built first as foundational test infra.",
       "milestones": [
         {
@@ -256,21 +256,21 @@
           "type": "Milestone",
           "id": "P1.M5",
           "title": "Sync Changeset-Level Documentation",
-          "status": "Planned",
+          "status": "Complete",
           "description": "Final catch-all task (Mode B per SOW §5) for cross-cutting documentation that only makes sense once the whole bugfix changeset is in place. The implementing subtasks already updated per-method JSDoc (Mode A); this task sweeps README.md and any overview docs that summarize the extension's capabilities to reflect the corrected behavior (reasoning preservation on interrupt, shortcut scope limited to active reasoning).",
           "tasks": [
             {
               "type": "Task",
               "id": "P1.M5.T1",
               "title": "Sync changeset-level documentation (README + overview)",
-              "status": "Planned",
+              "status": "Complete",
               "description": "Review and update README.md and any overview/architecture docs to reflect the corrected behavior: reasoning is preserved in the persisted message on interruption (single continuous [thinking, text] response), and the shortcut is active only during active reasoning (not during answer generation).",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M5.T1.S1",
                   "title": "Update README.md and overview docs to reflect reasoning-preservation and shortcut-scope fixes",
-                  "status": "Planned",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M2.T3.S1",

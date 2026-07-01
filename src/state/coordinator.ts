@@ -52,6 +52,9 @@ export interface ActiveProxy {
   triggerStop(): boolean;
   /** A transition is already in flight (state past Reasoning; PRD §24.3 / INV-004). */
   isInterrupting(): boolean;
+  /** True while the stream has started but reasoning has not begun (PRD §16 `Delegating`).
+   *  Used by the coordinator to record an EC-002 pending stop pressed during the network-stall window. */
+  isDelegating(): boolean;
 }
 
 /**
@@ -66,6 +69,10 @@ export class TransitionCoordinator {
   /** The single owned field: an optional reference to the active proxy (PRD §37). NEVER a copy of
    *  state — only a reference. `undefined` outside an active eligible stream. */
   private activeProxy: ActiveProxy | undefined = undefined;
+  /** EC-002: a stop pressed during `Delegating` (no reasoning yet) is recorded here and honored the
+   *  instant reasoning begins (consumed by the proxy's trackEvent). Cleared on proxy change, on consume,
+   *  or when the provider answers without reasoning. */
+  private pendingStop = false;
 
   /**
    * @param diagnostics  Shared structured logger (PRD §36). **Privacy (Appendix H):** only event
@@ -81,7 +88,24 @@ export class TransitionCoordinator {
    */
   setActiveProxy(proxy: ActiveProxy | undefined): void {
     this.activeProxy = proxy;
+    this.pendingStop = false;
     this.diagnostics.trace(proxy ? "coordinator.set-active" : "coordinator.clear-active", {});
+  }
+
+  /**
+   * EC-002: read + clear the pending-stop flag. Called by the proxy when the first reasoning event
+   * arrives (Delegating→Reasoning). Returns whether a pending stop was recorded for this response.
+   */
+  consumePendingStop(): boolean {
+    const was = this.pendingStop;
+    this.pendingStop = false;
+    return was;
+  }
+
+  /** Discard the pending stop because the provider answered WITHOUT reasoning. Called by
+   *  the proxy when the first event is text while still in Delegating. No-op when nothing was recorded. */
+  clearPendingStop(): void {
+    this.pendingStop = false;
   }
 
   /**
@@ -121,8 +145,16 @@ export class TransitionCoordinator {
       return false; // EC-001
     }
     if (!proxy.canInterrupt()) {
-      this.diagnostics.trace("coordinator.request-stop", { accepted: false, reason: "not-reasoning" });
-      return false; // PRD §22.5 / FM-001
+      // Contract (a): return false (covers FM-001/002/003, EC-001/005/006).
+      // Contract (b) / EC-002: if pressed during the Delegating window, RECORD a pending stop so it can be
+      // honored the instant reasoning begins. Idle (EC-001, pre-start) and terminal states do NOT record.
+      if (proxy.isDelegating()) {
+        this.pendingStop = true;
+        this.diagnostics.trace("coordinator.request-stop", { accepted: false, reason: "pending-stop-recorded" });
+      } else {
+        this.diagnostics.trace("coordinator.request-stop", { accepted: false, reason: "not-reasoning" });
+      }
+      return false;
     }
     try {
       proxy.triggerStop();

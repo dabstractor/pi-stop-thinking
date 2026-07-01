@@ -222,8 +222,8 @@ describe("StreamProxy — event filtering (P1.M7.T2.S1)", () => {
     expect(events.some((c) => c.event === "proxy.splice.start-suppressed")).toBe(true);
   });
 
-  test("replacement thinking_* suppressed (EC-017: reasoning returned anyway)", async () => {
-    const { diag } = makeCaptureDiag();
+  test("replacement thinking_* forwarded (EC-017: reasoning returned anyway)", async () => {
+    const { diag, events } = makeCaptureDiag();
     const controller = new TransitionController(diag);
     const buffer = new ReasoningBuffer(diag, 1_000_000);
     const mock = makeReplacementUpstream();
@@ -263,10 +263,21 @@ describe("StreamProxy — event filtering (P1.M7.T2.S1)", () => {
 
     await consumer;
 
-    // Only the primary's thinking events should appear (2: thinking_start + thinking_delta)
+    // Both the primary's AND replacement's thinking events should appear (EC-017: FORWARD)
     const thinkingEvents = seen.filter((t) => t === "thinking_start" || t === "thinking_delta" || t === "thinking_end");
-    expect(thinkingEvents).toHaveLength(2);
-    expect(thinkingEvents).toEqual(["thinking_start", "thinking_delta"]);
+    expect(thinkingEvents).toHaveLength(4);
+    expect(thinkingEvents).toEqual(["thinking_start", "thinking_delta", "thinking_start", "thinking_delta"]);
+
+    // EC-017 forward trace emitted
+    expect(events.some((c) => c.event === "proxy.splice.reasoning-forwarded")).toBe(true);
+
+    // Exactly one start and one terminal (INV-002/INV-003)
+    expect(seen.filter((t) => t === "start")).toHaveLength(1);
+    const terminals = seen.filter((t) => t === "done" || t === "error");
+    expect(terminals).toHaveLength(1);
+
+    // NO recursive interruption: replacement was launched exactly once
+    expect(mock.calls.length).toBe(1);
   });
 
   test("duplicate terminal suppressed (FM-014) with trace", async () => {

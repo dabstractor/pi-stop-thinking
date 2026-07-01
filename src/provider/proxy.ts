@@ -285,6 +285,12 @@ export class StreamProxy {
     return this._controller.canInterrupt();
   }
 
+  /** Stream started, reasoning not yet begun (PRD §16 `Delegating`). EC-002 pending-stop window.
+   *  Pure delegate to the FSM. */
+  isDelegating(): boolean {
+    return this._controller.getState() === "Delegating";
+  }
+
   /** A transition is in flight (PRD §24.3 / INV-004): state has left `Reasoning` but not reached terminal.
    *  Used by the coordinator/ShortcutManager to discard repeat presses (EC-009/EC-010). */
   isInterrupting(): boolean {
@@ -441,6 +447,16 @@ export class StreamProxy {
         this._controller.getState() === "Delegating"
       ) {
         this.transitionIfLegal("Reasoning");
+        // EC-002 (P1.M8.T2.S1): a stop pressed during the Delegating network-stall window is honored now.
+        // consumePendingStop() is true at most once (it clears itself); triggerStop() is legal (state==Reasoning).
+        if (this._coordinator?.consumePendingStop()) {
+          this.diagnostics.trace("proxy.pending-stop.triggered", {});
+          this.triggerStop();
+        }
+      }
+      // 2b. EC-003/EC-004 (P1.M8.T2.S1): provider answers WITHOUT reasoning → discard any pending stop.
+      if (isTextEvent(event) && this._controller.getState() === "Delegating") {
+        this._coordinator?.clearPendingStop();
       }
       // 3. Accumulate reasoning deltas while Reasoning (PRD §13.4/§23.2).
       //    `event.type === "thinking_delta"` narrows the union → event.delta: string.
@@ -492,7 +508,7 @@ export class StreamProxy {
    *
    * REPLACEMENT (`"splicing"`, PRD §18 "After Restart"):
    *   - `start`            → SUPPRESS (already emitted — PRD §18); trace `proxy.splice.start-suppressed`.
-   *   - `thinking_*`       → SKIP silently (never emit after restart — PRD §18; EC-017 stray reasoning).
+   *   - `thinking_*`       → FORWARD (EC-017: replacement returned reasoning anyway; no recursive interruption).
    *   - `done`/`error`     → forward ONCE (set {@link _messageEndEmitted}); a duplicate/after-transfer terminal
    *                          is discarded with `proxy.splice.duplicate-terminal` (PRD FM-014 / FM-015).
    *   - `text_*`/`toolcall_*` → forward.
@@ -534,8 +550,12 @@ export class StreamProxy {
       return;
     }
     if (isThinkingEvent(event)) {
-      // Never emit after restart (PRD §18); also covers EC-017 (replacement returns reasoning anyway).
-      return; // silent skip — high-frequency, no per-event trace to avoid spam
+      // EC-017 (P1.M8.T2.S1): the thinking-disabled replacement returned reasoning anyway. PRD mandates FORWARD
+      // it (single transition per response; recursive interruption out of scope). No recursion is possible:
+      // replacement events reach _emit only — they NEVER run trackEvent, so the FSM is not driven; triggerStop()
+      // is additionally gated on canInterrupt() which is false once the first transition left Reasoning.
+      this.diagnostics.trace("proxy.splice.reasoning-forwarded", {});
+      // fall through to push(event) below
     }
     if (isTerminalEvent(event)) {
       if (this._messageEndEmitted) {

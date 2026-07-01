@@ -32,11 +32,13 @@ function makeFakeProxy(overrides?: {
   reasoning?: boolean;
   canInterrupt?: boolean;
   interrupting?: boolean;
+  delegating?: boolean;
   triggerThrows?: boolean;
 }): { proxy: ActiveProxy; triggerStopCalls: { value: number } } {
   let reasoning = overrides?.reasoning ?? false;
   let canInterruptFlag = overrides?.canInterrupt ?? false;
   let interrupting = overrides?.interrupting ?? false;
+  let delegating = overrides?.delegating ?? false;
   const triggerThrows = overrides?.triggerThrows ?? false;
   const callCount = { value: 0 };
 
@@ -44,6 +46,7 @@ function makeFakeProxy(overrides?: {
     isReasoning: () => reasoning,
     canInterrupt: () => canInterruptFlag,
     isInterrupting: () => interrupting,
+    isDelegating: () => delegating,
     triggerStop: () => {
       callCount.value++;
       if (triggerThrows) throw new Error("boom");
@@ -188,6 +191,86 @@ describe("TransitionCoordinator — never-crash (PRD Appendix K)", () => {
     // Rejection traced
     const fault = events.find((e) => e.event === "coordinator.request-stop" && (e.fields as Record<string, unknown>)?.reason === "proxy-fault");
     expect(fault).toBeDefined();
+  });
+});
+
+describe("TransitionCoordinator — EC-002 pending stop (Delegating window)", () => {
+  test("requestStop during Delegating records pending stop; returns false", () => {
+    const { diag, events } = makeCaptureDiag();
+    const c = new TransitionCoordinator(diag);
+    const { proxy } = makeFakeProxy({ canInterrupt: false, delegating: true });
+
+    c.setActiveProxy(proxy);
+    expect(c.requestStop()).toBe(false);
+
+    const stop = events.find((e) => e.event === "coordinator.request-stop");
+    expect(stop).toBeDefined();
+    expect(stop!.fields).toEqual({ accepted: false, reason: "pending-stop-recorded" });
+  });
+
+  test("consumePendingStop returns true once, then false (self-clearing)", () => {
+    const { diag } = makeCaptureDiag();
+    const c = new TransitionCoordinator(diag);
+    const { proxy } = makeFakeProxy({ canInterrupt: false, delegating: true });
+
+    c.setActiveProxy(proxy);
+    c.requestStop(); // record
+
+    expect(c.consumePendingStop()).toBe(true);  // consumed
+    expect(c.consumePendingStop()).toBe(false); // already cleared
+  });
+
+  test("clearPendingStop discards the pending stop", () => {
+    const { diag } = makeCaptureDiag();
+    const c = new TransitionCoordinator(diag);
+    const { proxy } = makeFakeProxy({ canInterrupt: false, delegating: true });
+
+    c.setActiveProxy(proxy);
+    c.requestStop(); // record
+    c.clearPendingStop(); // discard
+
+    expect(c.consumePendingStop()).toBe(false);
+  });
+
+  test("setActiveProxy(undefined) resets pending stop", () => {
+    const { diag } = makeCaptureDiag();
+    const c = new TransitionCoordinator(diag);
+    const { proxy } = makeFakeProxy({ canInterrupt: false, delegating: true });
+
+    c.setActiveProxy(proxy);
+    c.requestStop(); // record
+    c.setActiveProxy(undefined); // reset
+
+    expect(c.consumePendingStop()).toBe(false);
+  });
+
+  test("setActiveProxy(proxy2) resets pending stop", () => {
+    const { diag } = makeCaptureDiag();
+    const c = new TransitionCoordinator(diag);
+    const { proxy: p1 } = makeFakeProxy({ canInterrupt: false, delegating: true });
+    const { proxy: p2 } = makeFakeProxy({ canInterrupt: false, delegating: false });
+
+    c.setActiveProxy(p1);
+    c.requestStop(); // record
+    c.setActiveProxy(p2); // reset
+
+    expect(c.consumePendingStop()).toBe(false);
+  });
+});
+
+describe("TransitionCoordinator — EC-001/Idle ignore (not Delegating)", () => {
+  test("requestStop during Idle/terminal returns false with reason not-reasoning; no pending stop recorded", () => {
+    const { diag, events } = makeCaptureDiag();
+    const c = new TransitionCoordinator(diag);
+    const { proxy } = makeFakeProxy({ canInterrupt: false, delegating: false });
+
+    c.setActiveProxy(proxy);
+    expect(c.requestStop()).toBe(false);
+
+    const stop = events.find((e) => e.event === "coordinator.request-stop");
+    expect(stop).toBeDefined();
+    expect(stop!.fields).toEqual({ accepted: false, reason: "not-reasoning" });
+    expect(c.consumePendingStop()).toBe(false); // nothing recorded
   });
 });
 

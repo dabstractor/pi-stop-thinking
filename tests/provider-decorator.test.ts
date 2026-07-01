@@ -246,6 +246,35 @@ describe("ProviderDecorator — wrapper delegation (transparent, all branches)",
     expect(f.stats.simpleCalls).toBe(1);
   });
 
+  test("EC-016 lock-in: enabled=false → direct delegation, no StreamProxy constructed (no proxy trace)", () => {
+    const events: Array<{ event: string }> = [];
+    const captureDiag: Diagnostics = {
+      trace() {},
+      debug(e) { events.push({ event: e }); },
+      info() {},
+      warn() {},
+      error() {},
+    } as Diagnostics;
+    const f = makeFakeRegistry();
+    const d = new ProviderDecorator(
+      { ...baseConfig, enabled: false },
+      captureDiag,
+      f.registry,
+    );
+    d.initialize();
+    const wrapper = f.registered as {
+      streamSimple: (m: unknown, c: unknown, o: unknown) => unknown;
+      stream: (m: unknown, c: unknown, o: unknown) => unknown;
+    };
+    // Invoke for a reasoning z.ai model — must delegate directly, NOT construct a StreamProxy
+    wrapper.streamSimple(mkModel(), ctx, opts);
+    expect(f.stats.simpleCalls).toBe(1);
+    // The delegate trace is emitted (stream path still works too)
+    expect(events.some((e) => e.event === "provider.streamSimple.delegate")).toBe(true);
+    // The proxy trace is NOT emitted (no StreamProxy was constructed)
+    expect(events.some((e) => e.event === "provider.streamSimple.proxy")).toBe(false);
+  });
+
   test("delegation never recurses into the wrapper (goes to the captured builtin, not the registry)", () => {
     const { f, wrapper } = setup();
     wrapper.streamSimple(mkModel(), ctx, opts);

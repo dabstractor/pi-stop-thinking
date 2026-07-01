@@ -45,6 +45,8 @@ export interface RealisticTwoPhaseMock {
   primaryOutput: AssistantMessage;
   /** The live replacement accumulating output — FRESH (never includes primary thinking). */
   replacementOutput: AssistantMessage;
+  /** Whether the primary signal has been aborted. */
+ readonly primaryAborted: boolean;
 }
 
 /** Minimal event spec the caller pushes; the mock derives contentIndex + partial from the live output. */
@@ -175,8 +177,15 @@ function applySpec(
 
 // ─── Factory ───────────────────────────────────────────────────────────
 
+export interface RealisticMockOpts {
+  /** When the primary's abort signal fires, emit an `{ type: "error", reason: "aborted" }` event
+   *  instead of throwing (mirrors the real `openai-completions` provider's abort behavior).
+   *  Default: `"throw"` (legacy mock behavior — throw `new Error("aborted")`). */
+  abortAs?: "throw" | "event";
+}
+
 export function makeRealisticTwoPhaseMock(
-  _opts?: Record<string, unknown>,
+  _opts?: RealisticMockOpts,
 ): RealisticTwoPhaseMock {
   const primaryOutput = makeOutput(); // live; driven by pushPrimary
   const replacementOutput = makeOutput(); // FRESH live; driven by pushReplacement
@@ -193,6 +202,8 @@ export function makeRealisticTwoPhaseMock(
   let replacementSignal: AbortSignal | undefined;
   let primaryClosed = false;
 
+  const abortAs = _opts?.abortAs ?? "throw";
+
   // Iterator control-flow mirrors makeScriptedTwoPhaseUpstream:
   // drain queue → check closed → check aborted → await 0ms with abort listener
   // `waitHolder.resolve` is an escape hatch so closePrimary() can wake a blocked iterator.
@@ -201,6 +212,8 @@ export function makeRealisticTwoPhaseMock(
     signal: AbortSignal | undefined,
     closed: () => boolean,
     waitHolder: { resolve: () => void },
+    output: AssistantMessage, // the live output for the abort-error-event path
+    abortBehavior: "throw" | "event",
   ) => ({
     async *[Symbol.asyncIterator]() {
       while (true) {
@@ -212,7 +225,19 @@ export function makeRealisticTwoPhaseMock(
           continue;
         }
         if (closed()) return;
-        if (signal?.aborted) throw new Error("aborted");
+        if (signal?.aborted) {
+          if (abortBehavior === "event") {
+            // Mirror the real openai-completions provider: catch the abort and
+            // emit { type: "error", reason: "aborted", error: output } instead of
+            // throwing. output.stopReason is set to "aborted" (same as the real
+            // provider's catch block). This event is the terminal for this stream.
+            output.stopReason = "aborted";
+            output.errorMessage = "Request was aborted";
+            yield { type: "error" as const, reason: "aborted" as const, error: output };
+            return;
+          }
+          throw new Error("aborted");
+        }
         await new Promise<void>((resolve, reject) => {
           const t = setTimeout(resolve, 0);
           waitHolder.resolve = resolve;
@@ -220,7 +245,13 @@ export function makeRealisticTwoPhaseMock(
             "abort",
             () => {
               clearTimeout(t);
-              reject(new Error("aborted"));
+              if (abortBehavior === "event") {
+                // The await resolves and the next loop iteration will see
+                // signal.aborted → emit error event → return.
+                resolve();
+              } else {
+                reject(new Error("aborted"));
+              }
             },
             { once: true },
           );
@@ -238,13 +269,15 @@ export function makeRealisticTwoPhaseMock(
       calls.push({ options: streamOpts });
 
       if (callCount === 1) {
-        // PRIMARY — reasoning ON, throws on abort
+        // PRIMARY — reasoning ON, abort behavior configurable (throw or emit error event)
         primarySignal = streamOpts?.signal;
         return makeIterator(
           primaryQueue,
           primarySignal,
           () => primaryClosed,
           primaryWaitHolder,
+          primaryOutput,
+          abortAs,
         );
       }
 
@@ -255,6 +288,8 @@ export function makeRealisticTwoPhaseMock(
         replacementSignal,
         () => false,
         replacementWaitHolder,
+        replacementOutput,
+        "throw", // replacement always throws on abort (matching real behavior)
       );
     }
   ) as unknown as ApiStreamSimpleFunction;
@@ -274,5 +309,6 @@ export function makeRealisticTwoPhaseMock(
     },
     primaryOutput,
     replacementOutput,
+    get primaryAborted() { return !!primarySignal?.aborted; },
   };
 }

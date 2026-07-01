@@ -96,8 +96,10 @@ export class StreamProxy {
   /**
    * Internal abort controller for the UPSTREAM stream ONLY (PRD §51 Abort Phase). Per-request, so the proxy
    * can abort the reasoning stream WITHOUT aborting Pi's overall request (whose signal is `options.signal`).
-   * `triggerStop()` aborts this; `run()` passes `this._internalAbort.signal` to `upstreamStreamFn`. The
-   * upstream's async iterator throws when aborted — `run()`'s catch treats that throw as the expected exit.
+   * `triggerStop()` aborts this; `run()` passes `this._internalAbort.signal` to `upstreamStreamFn`. The real
+   * openai-completions provider catches AbortError internally and emits an `{ type: "error", reason: "aborted" }`
+   * event (it never throws). The proxy detects this event in the loop when state is `Aborting` and routes it
+   * to the freeze/replacement path. Mock providers that throw on abort are also supported via the `catch` path.
    */
   private readonly _internalAbort: AbortController = new AbortController();
 
@@ -729,6 +731,46 @@ export class StreamProxy {
       // aborting Pi's overall request. options.signal was already fan-in'd into _internalAbort in the ctor.
       const upstream = upstreamStreamFn(model, context, { ...options, signal: this._internalAbort.signal });
       for await (const event of upstream) {
+        // ── Real-provider abort detection (§51) ──────────────────────────────
+        // The real openai-completions provider catches AbortError internally and
+        // emits `{ type: "error", reason: "aborted" }` instead of throwing (its
+        // async IIFE has a try/catch that converts all errors to error events).
+        // When the proxy is in Aborting state, this error event IS the expected
+        // upstream exit — route it to freeze/replacement instead of forwarding
+        // it as a terminal error. Checked BEFORE trackEvent to prevent the FSM
+        // from moving to Failed (trackEvent's error handler). The error event's
+        // `error` field carries the accumulated `AssistantMessage` (incl. any
+        // reasoning content streamed before the abort), which is captured as
+        // the frozen primary content for Issue 1's rewrite.
+        if (
+          this._controller.getState() === "Aborting" &&
+          event.type === "error" &&
+          (event as { type: "error"; reason: string; error: AssistantMessage }).reason === "aborted"
+        ) {
+          const errEv = event as { type: "error"; reason: string; error: AssistantMessage };
+          // Capture the primary's accumulated content from the error event's
+          // message (the real provider carries output.content = [thinking]).
+          if (errEv.error) {
+            this._primaryPartial = errEv.error;
+          }
+          this._clearAbortTimeout(); // clean abort — cancel the FM-006 safety net
+          try {
+            this._controller.completeAbort(); // Aborting → Capturing (PRD §16)
+          } catch (e) {
+            this.diagnostics.warn("proxy.abort.complete-abort-failed", {
+              error: e instanceof Error ? e.message : String(e),
+            });
+          }
+          this._buffer.freeze(); // PRD §41: reasoning immutable once frozen; §40: replacement needs this
+          // P1.M2.T1.S1 — snapshot the primary's structured content blocks (shallow-per-block clone).
+          this._frozenPrimaryContent = (this._primaryPartial?.content ?? []).map((b) => ({ ...b }));
+          this._contentIndexOffset = this._frozenPrimaryContent.length;
+          this.diagnostics.trace("proxy.abort.completed", {});
+          // PRD §40: primary aborted + reasoning frozen → launch the thinking-disabled replacement.
+          await this._launchReplacement(model, context, options, upstreamStreamFn);
+          return; // replacement owns the downstream terminal; primary loop done
+        }
+        // ── End real-provider abort detection ───────────────────────────────
         this.trackEvent(event);   // side-effect reasoning detection; never throws; never mutates event
         this._emit(event);        // §18 filtering: forwarding phase → forward all; set INV-002/INV-003 flags
         // P1.M2.T1.S1 — capture the provider's live accumulating partial (last non-terminal wins).

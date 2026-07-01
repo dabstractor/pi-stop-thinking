@@ -58,6 +58,12 @@ export interface ErrorInject {
   as: "throw" | "event";
 }
 
+/** Controls how the primary iterator handles its abort signal.
+ *  - `"throw"` (default): throw `new Error("aborted")` on signal abort.
+ *  - `"event"`: emit `{ type: "error", reason: "aborted", error: <message> }` as
+ *    the terminal event, mirroring the real `openai-completions` provider. */
+export type AbortBehavior = "throw" | "event";
+
 // ─── Seeded PRNG ─────────────────────────────────────────────────────────
 
 /** Deterministic PRNG (mulberry32) — every seed produces the same sequence. */
@@ -159,9 +165,10 @@ export interface TwoPhaseMock {
  * Optional errorInject: throws or pushes an error event at the given index within each phase.
  */
 export function makeScriptedTwoPhaseUpstream(
-  harnessOpts: { errorInject?: ErrorInject } = {},
+  harnessOpts: { errorInject?: ErrorInject; abortAs?: AbortBehavior } = {},
 ): TwoPhaseMock {
   const errorInject = harnessOpts.errorInject;
+  const abortAs = harnessOpts.abortAs ?? "throw";
   const calls: { options?: { reasoning?: unknown; signal?: AbortSignal } }[] = [];
   let primarySignal: AbortSignal | undefined;
   let replacementSignal: AbortSignal | undefined;
@@ -227,14 +234,33 @@ export function makeScriptedTwoPhaseUpstream(
                 return;
               }
               if (primaryStopped) return;
-              if (primarySignal?.aborted) throw new Error("aborted");
+              if (primarySignal?.aborted) {
+                if (abortAs === "event") {
+                  // Mirror the real openai-completions provider: emit error event
+                  // instead of throwing. The error message carries accumulated content.
+                  const errMsg = { ...ERROR_MESSAGE, stopReason: "aborted" as const, errorMessage: "Request was aborted" } as AssistantMessage;
+                  yield ev({
+                    type: "error",
+                    reason: "aborted",
+                    error: errMsg,
+                  });
+                  primaryStopped = true;
+                  return;
+                }
+                throw new Error("aborted");
+              }
               await new Promise<void>((resolve, reject) => {
                 const t = setTimeout(resolve, 0);
                 primarySignal?.addEventListener(
                   "abort",
                   () => {
                     clearTimeout(t);
-                    reject(new Error("aborted"));
+                    if (abortAs === "event") {
+                      // Resolve so the next iteration sees signal.aborted → emit error event
+                      resolve();
+                    } else {
+                      reject(new Error("aborted"));
+                    }
                   },
                   { once: true },
                 );

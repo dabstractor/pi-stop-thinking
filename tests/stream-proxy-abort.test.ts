@@ -387,6 +387,244 @@ describe("StreamProxy — abort coordination (P1.M5.T1.S1)", () => {
     expect(buffer.snapshot().map((e) => e.content)).toEqual(["a"]);
   });
 
+  // ─── Real-provider abort regression (error event instead of throw) ────────
+
+  /**
+   * Mock that mirrors the REAL openai-completions provider's abort behavior:
+   * catches the abort internally and emits `{ type: "error", reason: "aborted" }`
+   * as a terminal event, then returns cleanly (never throws). This is the exact
+   * pattern that caused the CRITICAL finding — the proxy's catch-only abort path
+   * was unreachable.
+   */
+  function makeErrorEventAbortUpstream() {
+    let signal: AbortSignal | undefined;
+    const queue: AssistantMessageEvent[] = [];
+    const iterable = {
+      async *[Symbol.asyncIterator]() {
+        while (true) {
+          if (queue.length > 0) {
+            const e = queue.shift()!;
+            yield e;
+            if (e.type === "done" || e.type === "error") return;
+            continue;
+          }
+          if (signal?.aborted) {
+            // Real-provider behavior: emit error event with reason="aborted"
+            const abortedMsg = {
+              ...ERROR_MESSAGE,
+              stopReason: "aborted" as const,
+              errorMessage: "Request was aborted",
+            } as AssistantMessage;
+            yield {
+              type: "error" as const,
+              reason: "aborted" as const,
+              error: abortedMsg,
+            } as AssistantMessageEvent;
+            return; // stream ends cleanly — no throw
+          }
+          await new Promise<void>((resolve, reject) => {
+            const t = setTimeout(resolve, 0);
+            signal?.addEventListener(
+              "abort",
+              () => {
+                clearTimeout(t);
+                // Resolve so next loop iteration sees signal.aborted
+                resolve();
+              },
+              { once: true },
+            );
+          });
+        }
+      },
+    };
+    const fn = ((_m: unknown, _c: unknown, opts?: { signal?: AbortSignal }) => {
+      signal = opts?.signal;
+      return iterable;
+    }) as unknown as ApiStreamSimpleFunction;
+    return {
+      fn,
+      push: (e: AssistantMessageEvent) => queue.push(e),
+      isAborted: () => !!signal?.aborted,
+    };
+  }
+
+  /**
+   * Two-phase mock where the primary emits an error event on abort (real-provider
+   * behavior) and the replacement is a standard two-phase mock.
+   */
+  function makeErrorEventAbortTwoPhase() {
+    let primarySignal: AbortSignal | undefined;
+    let replacementSignal: AbortSignal | undefined;
+    const primaryQueue: AssistantMessageEvent[] = [];
+    const replacementQueue: AssistantMessageEvent[] = [];
+    let callCount = 0;
+    const fn = ((_m: unknown, _c: unknown, opts?: { signal?: AbortSignal }) => {
+      callCount++;
+      if (callCount === 1) {
+        primarySignal = opts?.signal;
+        return {
+          async *[Symbol.asyncIterator]() {
+            while (true) {
+              if (primaryQueue.length > 0) {
+                const e = primaryQueue.shift()!;
+                yield e;
+                if (e.type === "done" || e.type === "error") return;
+                continue;
+              }
+              if (primarySignal?.aborted) {
+                const abortedMsg = {
+                  ...ERROR_MESSAGE,
+                  stopReason: "aborted" as const,
+                  errorMessage: "Request was aborted",
+                } as AssistantMessage;
+                yield {
+                  type: "error" as const,
+                  reason: "aborted" as const,
+                  error: abortedMsg,
+                } as AssistantMessageEvent;
+                return;
+              }
+              await new Promise<void>((resolve, reject) => {
+                const t = setTimeout(resolve, 0);
+                primarySignal?.addEventListener(
+                  "abort",
+                  () => { clearTimeout(t); resolve(); },
+                  { once: true },
+                );
+              });
+            }
+          },
+        };
+      }
+      // 2nd call = REPLACEMENT
+      replacementSignal = opts?.signal;
+      return {
+        async *[Symbol.asyncIterator]() {
+          while (true) {
+            if (replacementSignal?.aborted) throw new Error("aborted");
+            if (replacementQueue.length) { yield replacementQueue.shift()!; continue; }
+            await new Promise<void>((resolve, reject) => {
+              const t = setTimeout(resolve, 0);
+              replacementSignal?.addEventListener("abort", () => { clearTimeout(t); reject(new Error("aborted")); }, { once: true });
+            });
+          }
+        },
+      };
+    }) as unknown as ApiStreamSimpleFunction;
+    return {
+      fn,
+      pushPrimary: (e: AssistantMessageEvent) => primaryQueue.push(e),
+      pushReplacement: (e: AssistantMessageEvent) => replacementQueue.push(e),
+    };
+  }
+
+  test("real-provider abort: error event on abort triggers freeze+replacement (CRITICAL regression)", async () => {
+    const { diag, events } = makeCaptureDiag();
+    const controller = new TransitionController(diag);
+    const buffer = new ReasoningBuffer(diag, 1_000_000);
+    const mock = makeErrorEventAbortUpstream();
+
+    const proxy = new StreamProxy(
+      makeModel(),
+      {} as never,
+      {} as never,
+      mock.fn,
+      diag,
+      controller,
+      buffer,
+      DEFAULT_CONFIG.transitionTimeoutMs,
+      undefined, // requestBuilder
+      15, // replacementStartupTimeoutMs — small so orphaned replacement fails fast
+    );
+
+    // Drive events to reach Reasoning
+    mock.push(ev({ type: "start" }));
+    mock.push(ev({ type: "thinking_start", contentIndex: 0 }));
+    mock.push(ev({ type: "thinking_delta", contentIndex: 0, delta: "thinking..." }));
+    await waitFor(() => proxy.isReasoning());
+
+    // Dispatch the abort — mock will emit error event, NOT throw
+    expect(proxy.triggerStop()).toBe(true);
+    expect(mock.isAborted()).toBe(true);
+
+    // The proxy MUST detect the aborted error event in the loop and route to
+    // the freeze/replacement path — NOT forward it as a terminal.
+    // Wait for proxy.abort.completed (the clean-abort marker that proves the
+    // freeze/replacement path was reached).
+    await waitFor(() => events.some((c) => c.event === "proxy.abort.completed"), 500);
+
+    // Buffer must be frozen
+    expect(() => buffer.append("no")).toThrow();
+
+    // proxy.abort.completed must have been traced
+    expect(events.some((c) => c.event === "proxy.abort.completed")).toBe(true);
+  });
+
+  test("real-provider abort: replacement launched and completes with text (full E2E)", async () => {
+    const { diag, events } = makeCaptureDiag();
+    const controller = new TransitionController(diag);
+    const buffer = new ReasoningBuffer(diag, 1_000_000);
+    const mock = makeErrorEventAbortTwoPhase();
+
+    const proxy = new StreamProxy(
+      makeModel(),
+      {} as never,
+      {} as never,
+      mock.fn,
+      diag,
+      controller,
+      buffer,
+      DEFAULT_CONFIG.transitionTimeoutMs,
+      undefined, // requestBuilder
+      2000, // replacementStartupTimeoutMs — generous for replacement to complete
+    );
+
+    // Drain consumer concurrently
+    const seen: AssistantMessageEvent[] = [];
+    const consumer = (async () => {
+      for await (const e of proxy.output) seen.push(e);
+    })();
+
+    // Drive primary to Reasoning
+    mock.pushPrimary(ev({ type: "start" }));
+    mock.pushPrimary(ev({ type: "thinking_start", contentIndex: 0 }));
+    mock.pushPrimary(ev({ type: "thinking_delta", contentIndex: 0, delta: "thinking..." }));
+    await waitFor(() => proxy.isReasoning());
+
+    // Dispatch abort — mock emits { type: "error", reason: "aborted" }
+    expect(proxy.triggerStop()).toBe(true);
+
+    // Wait for replacement to be launched (proxy.abort.completed means we passed through Capturing)
+    await waitFor(() => events.some((c) => c.event === "proxy.abort.completed"), 500);
+
+    // Push replacement events
+    mock.pushReplacement(ev({ type: "text_start", contentIndex: 0 }));
+    mock.pushReplacement(ev({ type: "text_delta", contentIndex: 0, delta: "Answer" }));
+    mock.pushReplacement(ev({ type: "done", reason: "stop", message: DONE_MESSAGE }));
+
+    await consumer;
+
+    // Consumer must see: primary thinking events + replacement text + done
+    // The aborted error event must NOT be forwarded downstream
+    const types = seen.map((e) => e.type);
+    expect(types).toContain("start");
+    expect(types).toContain("thinking_start");
+    expect(types).toContain("thinking_delta");
+    expect(types).toContain("text_start");
+    expect(types).toContain("text_delta");
+    expect(types).toContain("done");
+
+    // Exactly one terminal (the replacement's done — NOT the abort error)
+    const terminals = types.filter((t) => t === "done" || t === "error");
+    expect(terminals).toEqual(["done"]);
+
+    // Authority must have flipped to splicing
+    expect(proxy.authority).toBe("splicing");
+
+    // Controller must have reached Idle
+    await waitFor(() => controller.getState() === "Idle", 500);
+  });
+
   test("privacy guard: abort diagnostics log only allow-listed fields", async () => {
     const { diag, events } = makeCaptureDiag();
     const controller = new TransitionController(diag);

@@ -1,5 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { Diagnostics } from "../diagnostics";
+import type { Telemetry } from "../telemetry";
 
 /** The key-identifier type accepted by {@link ExtensionAPI.registerShortcut}. Extracted so we can
  *  pass a `string` shortcut (from `config.shortcut`) without importing `KeyId` from pi-tui.
@@ -57,8 +58,13 @@ export class ShortcutManager {
   /**
    * @param diagnostics  Shared structured logger (PRD §36). Privacy (Appendix H): only shortcut lifecycle
    *                     events + the requestStop() boolean result are logged — never content (there is none).
+   * @param _telemetry   Optional telemetry recorder (PRD §35). When provided, counts `IgnoredShortcutPresses`
+   *                     on both ignored-press paths. Omitting → undefined (safe no-op, backward-compatible).
    */
-  constructor(private readonly diagnostics: Diagnostics) {}
+  constructor(
+    private readonly diagnostics: Diagnostics,
+    private readonly _telemetry?: Telemetry,
+  ) {}
 
   /**
    * Register the stop shortcut with Pi (PRD §33 / §13.5 / §24.1).
@@ -85,12 +91,16 @@ export class ShortcutManager {
     try {
       // EC-010 (key held / OS auto-repeat) + PRD §24.3: discard once a transition is in flight.
       if (coordinator.alreadyInterrupting()) {
+        this._telemetry?.incrementCounter("IgnoredShortcutPresses");
         this.diagnostics.trace("shortcut.ignored", { reason: "already-interrupting" });
         return;
       }
       // Raise the REQUEST (PRD §24.2). The coordinator → controller is idempotent: returns false and changes
       // nothing outside Reasoning (FM-001). ShortcutManager holds no dedup state of its own.
       const accepted = coordinator.requestStop();
+      if (!accepted) {
+        this._telemetry?.incrementCounter("IgnoredShortcutPresses");
+      }
       this.diagnostics.trace("shortcut.forwarded", { accepted });
     } catch (err) {
       // Never crash the host (PRD Appendix E/K).

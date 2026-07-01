@@ -643,14 +643,14 @@
               "type": "Task",
               "id": "P1.M8.T1",
               "title": "Telemetry Module",
-              "status": "Researching",
+              "status": "Complete",
               "description": "Implement structured telemetry recording that captures transition metrics without affecting functionality. All telemetry failures are silently ignored.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M8.T1.S1",
                   "title": "Telemetry recorder with privacy-safe metrics",
-                  "status": "Researching",
+                  "status": "Complete",
                   "story_points": 2,
                   "dependencies": [
                     "P1.M7.T3.S1"
@@ -677,7 +677,7 @@
                   "type": "Subtask",
                   "id": "P1.M8.T2.S1",
                   "title": "Shortcut timing failure modes and edge cases",
-                  "status": "Planned",
+                  "status": "Researching",
                   "story_points": 2,
                   "dependencies": [
                     "P1.M7.T3.S1"

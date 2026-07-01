@@ -1,5 +1,6 @@
 import { describe, test, expect, mock } from "bun:test";
 import { ShortcutManager, type StopRequestCoordinator } from "../src/shortcut";
+import { Telemetry } from "../src/telemetry";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { Diagnostics } from "../src/diagnostics";
 
@@ -144,6 +145,69 @@ describe("ShortcutManager — forwarding & idempotency (PRD §24.3, EC-009, EC-0
 
     expect(() => pi.captured()!.handler(undefined)).not.toThrow();
     expect(events.some((e) => e.event === "shortcut.handler-error")).toBe(true);
+  });
+});
+
+describe("ShortcutManager — telemetry IgnoredShortcutPresses wiring (P1.M8.T1.S1)", () => {
+  test("IgnoredShortcutPresses increments on alreadyInterrupting path (EC-009/EC-010)", () => {
+    const { diag, events } = makeCaptureDiag();
+    const pi = makeFakePi();
+    const telemetry = new Telemetry(true, diag);
+    const manager = new ShortcutManager(diag, telemetry);
+    const fake = makeStatefulFakeCoordinator();
+    manager.register(pi.pi, "ctrl+.", fake.coordinator);
+    const handler = pi.captured()!.handler;
+
+    handler(undefined); // first: accepted
+    handler(undefined); // EC-010 discard
+    handler(undefined); // EC-010 discard
+
+    expect(telemetry.getCounter("IgnoredShortcutPresses")).toBe(2);
+    // Existing traces must still be emitted
+    const ignored = events.filter((e) => e.event === "shortcut.ignored");
+    expect(ignored.length).toBe(2);
+  });
+
+  test("IgnoredShortcutPresses increments on !accepted path (FM-001)", () => {
+    const { diag, events } = makeCaptureDiag();
+    const pi = makeFakePi();
+    const telemetry = new Telemetry(true, diag);
+    const manager = new ShortcutManager(diag, telemetry);
+    manager.register(pi.pi, "ctrl+.", makeRejectingFakeCoordinator());
+    const handler = pi.captured()!.handler;
+
+    handler(undefined);
+
+    expect(telemetry.getCounter("IgnoredShortcutPresses")).toBe(1);
+    // Existing trace still emitted
+    expect(events.some((e) => e.event === "shortcut.forwarded" && e.fields?.accepted === false)).toBe(true);
+  });
+
+  test("accepted press does NOT increment IgnoredShortcutPresses", () => {
+    const { diag } = makeCaptureDiag();
+    const pi = makeFakePi();
+    const telemetry = new Telemetry(true, diag);
+    const manager = new ShortcutManager(diag, telemetry);
+    manager.register(pi.pi, "ctrl+.", makeStatefulFakeCoordinator().coordinator);
+    pi.captured()!.handler(undefined); // single accepted press
+
+    expect(telemetry.getCounter("IgnoredShortcutPresses")).toBeUndefined();
+  });
+
+  test("backward compat: ShortcutManager without telemetry arg is a safe no-op", () => {
+    const { diag, events } = makeCaptureDiag();
+    const pi = makeFakePi();
+    const manager = new ShortcutManager(diag);
+    const fake = makeStatefulFakeCoordinator();
+    manager.register(pi.pi, "ctrl+.", fake.coordinator);
+    const handler = pi.captured()!.handler;
+
+    handler(undefined); // accepted
+    handler(undefined); // EC-010 discard
+
+    // Existing traces must still hold
+    expect(events.some((e) => e.event === "shortcut.forwarded" && e.fields?.accepted === true)).toBe(true);
+    expect(events.some((e) => e.event === "shortcut.ignored" && e.fields?.reason === "already-interrupting")).toBe(true);
   });
 });
 

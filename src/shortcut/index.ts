@@ -34,7 +34,7 @@ export interface StopRequestCoordinator {
  * registration or holding dedup state. PRD §13.5: the layer does ONLY register / determine-valid / signal —
  * "Nothing more."
  *
- * **Configurability**: the shortcut is user-configurable via `config.shortcut` (default `"ctrl+."` — see
+ * **Configurability**: the shortcut is user-configurable via `config.shortcut` (default `"ctrl+q"` — see
  * `src/config` `DEFAULT_CONFIG.shortcut`, PRD §47 / Appendix K). The factory (P1.M4.T4) reads the validated
  * config and passes `config.shortcut` into {@link register}; ShortcutManager itself does not import config.
  *
@@ -70,8 +70,8 @@ export class ShortcutManager {
    * Register the stop shortcut with Pi (PRD §33 / §13.5 / §24.1).
    *
    * @param pi           Pi extension API (`registerShortcut`).
-   * @param shortcut     The configured shortcut string (e.g. `"ctrl+."`; configurable via `config.shortcut`,
-   *                     default `"ctrl+."`). Passed straight to `pi.registerShortcut`.
+   * @param shortcut     The configured shortcut string (e.g. `"ctrl+q"`; configurable via `config.shortcut`,
+   *                     default `"ctrl+q"`). Passed straight to `pi.registerShortcut`.
    * @param coordinator  The stop-request authority (P1.M4.T4 `TransitionCoordinator` satisfies
    *                     {@link StopRequestCoordinator}).
    */

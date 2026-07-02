@@ -189,7 +189,7 @@ export class RequestBuilder {
         timestamp: Date.now(),
       };
       // §53 h3.73 ephemeral/scoping — FRESH context copy + NEW messages array (original untouched).
-      replacementContext = { ...context, messages: [...context.messages, directiveMessage] };
+      replacementContext = { ...context, messages: [...(context.messages ?? []), directiveMessage] };
     } else {
       replacementContext = context; // gated fallback — SAME ref (ADR-005 / INV-008)
     }

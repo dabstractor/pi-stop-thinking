@@ -134,7 +134,7 @@ export default function stopThinkingExtension(
     // (4) Capture + register the transparent wrapper. May throw (built-in provider absent) — caught below.
     decorator.initialize();
 
-    // (4a) Register the Ctrl+. shortcut (PRD §33 / §13.5 / §24.1). Non-fatal — a fault is warned + the
+    // (4a) Register the stop shortcut (PRD §33 / §13.5 / §24.1). Non-fatal — a fault is warned + the
     // rest of the extension remains functional (the shortcut simply won't fire, but pass-through works).
     try {
       new ShortcutManager(diagnostics, telemetry).register(pi, config.shortcut, coordinator);

@@ -16,7 +16,7 @@ describe("StreamProxy — replacement terminal rewrite (P1.M2.T2.S2)", () => {
 
     const proxy = new StreamProxy(
       makeModel(), {} as never, {} as never, mock.fn, diag, controller, buffer,
-      DEFAULT_CONFIG.transitionTimeoutMs, undefined, 15, // orphan-safe replacement startup timeout
+      DEFAULT_CONFIG.transitionTimeoutMs, undefined, 2000, // generous replacement startup timeout
     );
 
     // PRIMARY (reasoning ON) → primaryOutput.content grows to [{thinking:'Let me'}].

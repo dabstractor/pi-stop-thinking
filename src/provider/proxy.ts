@@ -115,9 +115,18 @@ export class StreamProxy {
 
   /**
    * Per-request RequestBuilder (PRD §31) — produces the thinking-disabled replacement triple (PRD §53).
-   * Optional DI; production omits and the proxy self-creates `new RequestBuilder(diagnostics)`.
+   * Optional DI; production omits and the proxy self-creates
+   * `new RequestBuilder(diagnostics, reasoningInjection, delimiter)` (P2.M2.T3.S1), seeding the
+   * §53 directive gate with the live config. When a builder is injected, the config params are inert.
    */
   private readonly _requestBuilder: RequestBuilder;
+
+  /** Directive-injection toggle forwarded to the self-created RequestBuilder (PRD §53 / P2.M2.T3.S1).
+   *  Inert when a `requestBuilder` is dependency-injected (DI seam wins). */
+  private readonly _reasoningInjection: boolean;
+  /** Directive open/close fence forwarded to the self-created RequestBuilder (PRD §53 h3.71 / P2.M2.T3.S1).
+   *  Inert when a `requestBuilder` is dependency-injected. */
+  private readonly _delimiter: { open: string; close: string };
 
   /**
    * Hard ceiling (ms) waiting for the replacement stream's FIRST event before the transition fails
@@ -266,6 +275,9 @@ export class StreamProxy {
     requestBuilder?: RequestBuilder,
     replacementStartupTimeoutMs: number = DEFAULT_CONFIG.replacementStartupTimeoutMs,
     coordinator?: TransitionCoordinator, // P1.M7.T3.S1 — optional session coordinator
+    // NEW (P2.M2.T3.S1) — directive config forwarded to the self-created RequestBuilder (PRD §53):
+    reasoningInjection: boolean = DEFAULT_CONFIG.reasoningInjection,
+    delimiter: { open: string; close: string } = DEFAULT_CONFIG.reasoningInjectionDelimiter,
   ) {
     this._model = model;
     this.diagnostics = diagnostics;
@@ -273,9 +285,11 @@ export class StreamProxy {
     this._controller = controller ?? new TransitionController(diagnostics);
     this._buffer = buffer ?? new ReasoningBuffer(diagnostics, DEFAULT_CONFIG.maximumReasoningBufferBytes);
     this._abortTimeoutMs = abortTimeoutMs;
-    this._requestBuilder = requestBuilder ?? new RequestBuilder(diagnostics);
+    this._requestBuilder = requestBuilder ?? new RequestBuilder(diagnostics, reasoningInjection, delimiter);
     this._replacementStartupTimeoutMs = replacementStartupTimeoutMs;
     this._coordinator = coordinator;
+    this._reasoningInjection = reasoningInjection;
+    this._delimiter = delimiter;
 
     // Propagate Pi's abort (user escape / ctrl+c) into the INTERNAL controller so the upstream still stops on
     // escape, while keeping a SEPARATE controller the extension can abort via triggerStop() without touching

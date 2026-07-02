@@ -65,7 +65,7 @@
           "type": "Milestone",
           "id": "P2.M2",
           "title": "Directive Construction & Integration — Core §53 Implementation",
-          "status": "Ready",
+          "status": "Complete",
           "description": "Implement the Ephemeral Execution Directive: render the frozen ReasoningBuffer snapshot to plain text, wrap it in the configured delimiter fence, and inject it as ephemeral reference context into a non-mutating copy of the replacement request's Context. Modify RequestBuilder.buildReplacement (which currently accepts reasoningSnapshot but does NOT read it), thread config through StreamProxy into the builder, and update the decorator call site.",
           "tasks": [
             {
@@ -153,14 +153,14 @@
               "type": "Task",
               "id": "P2.M2.T3",
               "title": "Wire directive config through StreamProxy into RequestBuilder",
-              "status": "Ready",
+              "status": "Complete",
               "description": "Thread the two new config fields from Config through the StreamProxy constructor (which constructs the RequestBuilder) and update the ProviderDecorator's StreamProxy construction call site to pass config.reasoningInjection and config.reasoningInjectionDelimiter. The proxy itself does no directive logic — it merely forwards the config to the builder it self-creates.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P2.M2.T3.S1",
                   "title": "Thread config fields through StreamProxy ctor + update decorator call site",
-                  "status": "Ready",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [
                     "P2.M2.T2.S1"
@@ -201,7 +201,7 @@
                   "type": "Subtask",
                   "id": "P2.M3.T1.S1",
                   "title": "Extend config tests for reasoningInjection + reasoningInjectionDelimiter",
-                  "status": "Planned",
+                  "status": "Researching",
                   "story_points": 1,
                   "dependencies": [
                     "P2.M1.T1.S1",

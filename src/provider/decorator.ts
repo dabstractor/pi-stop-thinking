@@ -203,6 +203,8 @@ export class ProviderDecorator {
           undefined, undefined,
           this.config.transitionTimeoutMs, undefined, this.config.replacementStartupTimeoutMs,
           this._coordinator,
+          this.config.reasoningInjection,          // NEW (P2.M2.T3.S1) — directive config → RequestBuilder
+          this.config.reasoningInjectionDelimiter,
         );
         // INV-004: register this proxy as the active target for shortcut-driven stop requests.
         this._coordinator?.setActiveProxy(proxy);

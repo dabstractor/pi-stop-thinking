@@ -10,7 +10,8 @@ A [Pi](https://github.com/earendil-works/pi) extension that lets you press a sin
 - **Transparent provider decoration** — when the extension is inactive or the provider isn't supported, requests pass through unchanged with zero observable behavioral difference.
 - **Zero-config defaults** — works out of the box after installation; no settings to edit.
 - **z.ai-specific** — activates for any reasoning-enabled z.ai model (e.g. GLM-4.5, GLM-4.6, GLM-4.7, GLM-5.x), detected automatically from the model registry.
-- **Reasoning is preserved** — when you stop the reasoning, it stays in the saved assistant message, followed by the answer.
+- **Reasoning is reused, not discarded** — by default, the reasoning captured before you pressed `Ctrl+Q` is fed back to the model as ephemeral, fenced reference context, so the answer is informed by it rather than produced from scratch (best-effort, proportional to how far reasoning got). This is independent of the display preservation below.
+- **Reasoning is preserved for display** — the captured reasoning stays in the saved assistant message, and the answer follows it. The saved turn reads like a normal response: reasoning, then the answer.
 
 ## Installation
 
@@ -52,6 +53,8 @@ All configuration fields use validated internal defaults. Invalid values fall ba
 | `transitionTimeoutMs` | `number` (ms, > 0) | `5000` |
 | `replacementStartupTimeoutMs` | `number` (ms, > 0) | `10000` |
 | `maximumReasoningBufferBytes` | `integer` (bytes, > 0) | `8388608` (8 MiB) |
+| `reasoningInjection` | `boolean` | `true` |
+| `reasoningInjectionDelimiter` | `{ open: string; close: string }` | `{ open: "---\n[Prior reasoning captured before you were asked to stop thinking]", close: "[End of prior reasoning]\n---" }` |
 | `telemetryEnabled` | `boolean` | `false` |
 | `diagnosticsLevel` | `"error"` \| `"warn"` \| `"info"` \| `"debug"` \| `"trace"` | `"error"` |
 
@@ -67,10 +70,13 @@ Pi's extension API does not pass a settings object to extensions, so this extens
 | `PI_STOP_THINKING_TRANSITION_TIMEOUT_MS` | `transitionTimeoutMs` | `8000` |
 | `PI_STOP_THINKING_REPLACEMENT_TIMEOUT_MS` | `replacementStartupTimeoutMs` | `15000` |
 | `PI_STOP_THINKING_MAX_REASONING_BUFFER_BYTES` | `maximumReasoningBufferBytes` | `4194304` |
+| `PI_STOP_THINKING_REASONING_INJECTION` | `reasoningInjection` | `false` |
+| `PI_STOP_THINKING_REASONING_INJECTION_DELIMITER_OPEN` | `reasoningInjectionDelimiter.open` | `"[Start of prior reasoning]"` |
+| `PI_STOP_THINKING_REASONING_INJECTION_DELIMITER_CLOSE` | `reasoningInjectionDelimiter.close` | `"[End of prior reasoning]"` |
 | `PI_STOP_THINKING_TELEMETRY` | `telemetryEnabled` | `true` |
 | `PI_STOP_THINKING_DIAGNOSTICS` | `diagnosticsLevel` (`error`\|`warn`\|`info`\|`debug`\|`trace`) | `trace` |
 
-Booleans accept `true`/`1`/`yes`/`on` and `false`/`0`/`no`/`off` (case-insensitive). To observe runtime behavior while debugging, set `PI_STOP_THINKING_DIAGNOSTICS=trace` (output goes to the console).
+Booleans accept `true`/`1`/`yes`/`on` and `false`/`0`/`no`/`off` (case-insensitive). To observe runtime behavior while debugging, set `PI_STOP_THINKING_DIAGNOSTICS=trace` (output goes to the console). For `PI_STOP_THINKING_REASONING_INJECTION_DELIMITER_*`, if you set only one of `_OPEN` / `_CLOSE`, the other half falls back to its default (an empty value is treated as unset).
 
 The `--no-stop-thinking` CLI flag is still available and forces `enabled` to `false` for that run (the extension then delegates transparently).
 
@@ -98,7 +104,14 @@ The extension uses two mechanisms:
 
 1. **Provider decoration** — On startup, the extension captures Pi's built-in `openai-completions` provider and registers a transparent wrapper under the source id `stop-thinking-extension`. Every request is evaluated: if the provider is z.ai, the model is reasoning-enabled, and the extension is enabled, the request is routed through the interruption pipeline; otherwise it is delegated to the captured built-in provider unchanged.
 
-2. **Stream splicing** — When you press `Ctrl+Q`, the wrapper aborts the reasoning stream (via an internal `AbortController`), freezes the captured reasoning buffer, and issues a thinking-disabled replacement request to the same provider. The replacement stream's events are rewritten and merged into the same downstream `AssistantMessageEventStream` so Pi sees one continuous, uninterrupted assistant turn. The reasoning captured before the interruption is preserved, and the answer text follows it — the resulting message is a normal `[thinking, text]` sequence, the same shape as a non-interrupted reasoning response, with no restart artifact.
+2. **Stream splicing** — When you press `Ctrl+Q`, the wrapper aborts the reasoning stream (via an internal `AbortController`), freezes the captured reasoning buffer, and issues a thinking-disabled replacement request to the same provider. The replacement stream's events are rewritten and merged into the same downstream `AssistantMessageEventStream` so Pi sees one continuous, uninterrupted assistant turn. The replacement request also carries the frozen reasoning snapshot as **ephemeral input context** (the §53 Ephemeral Execution Directive), so the model conditions its answer on its own prior reasoning rather than starting from scratch.
+
+   The captured reasoning serves **two distinct purposes**, which must not be confused:
+
+   - **Input injection (reasoning reuse)** — the snapshot is rendered to text, wrapped in a clearly-labeled delimiter fence, and appended to the replacement request's messages as a single `user` message marked *"reference context only"*. The model reads its own prior reasoning and produces an answer informed by it (best-effort, proportional to how far reasoning got). This context is ephemeral: it lives only within that one replacement request and is never persisted into conversation history as a new or modified message.
+   - **Output stitching (display preservation)** — the captured reasoning is preserved in the saved assistant message, and the answer text follows it, producing a normal `[thinking, text]` sequence — the same shape as a non-interrupted reasoning response, with no restart artifact.
+
+   If reasoning injection is disabled (`reasoningInjection: false`) or nothing was captured, the input-injection step is skipped and the answer is generated from scratch; output stitching still applies.
 
 On session shutdown the wrapper is unregistered, restoring Pi's unmodified built-in provider.
 

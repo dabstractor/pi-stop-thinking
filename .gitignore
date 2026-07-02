@@ -11,3 +11,6 @@ venv/
 
 # OS-specific files
 .DS_Store
+
+# Pi subagent runtime working directory
+.pi-subagents/

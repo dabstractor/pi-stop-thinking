@@ -150,6 +150,39 @@ describe("loadConfigFromEnv — production loader (PI_STOP_THINKING_*)", () => {
     expect(loadConfigFromEnv({ [E + "TRANSITION_TIMEOUT_MS"]: "fast" }).transitionTimeoutMs).toBe(5000);
     expect(loadConfigFromEnv({ [E + "PROVIDERS"]: ",," }).supportedProviders).toEqual(["zai"]);
   });
+  test("parses reasoningInjection (true/false/1/0/yes/no)", () => {
+    expect(loadConfigFromEnv({ [E + "REASONING_INJECTION"]: "false" }).reasoningInjection).toBe(false);
+    expect(loadConfigFromEnv({ [E + "REASONING_INJECTION"]: "0" }).reasoningInjection).toBe(false);
+    expect(loadConfigFromEnv({ [E + "REASONING_INJECTION"]: "yes" }).reasoningInjection).toBe(true);
+  });
+  test("invalid reasoningInjection falls back to default true", () => {
+    expect(loadConfigFromEnv({ [E + "REASONING_INJECTION"]: "maybe" }).reasoningInjection).toBe(true);
+  });
+  test("parses delimiter OPEN-only (CLOSE defaults)", () => {
+    const r = loadConfigFromEnv({ [E + "REASONING_INJECTION_DELIMITER_OPEN"]: "<<start>>" });
+    expect(r.reasoningInjectionDelimiter.open).toBe("<<start>>");
+    expect(r.reasoningInjectionDelimiter.close).toBe(DEFAULT_CONFIG.reasoningInjectionDelimiter.close);
+  });
+  test("parses delimiter CLOSE-only (OPEN defaults)", () => {
+    const r = loadConfigFromEnv({ [E + "REASONING_INJECTION_DELIMITER_CLOSE"]: "<<end>>" });
+    expect(r.reasoningInjectionDelimiter.open).toBe(DEFAULT_CONFIG.reasoningInjectionDelimiter.open);
+    expect(r.reasoningInjectionDelimiter.close).toBe("<<end>>");
+  });
+  test("parses delimiter BOTH", () => {
+    const r = loadConfigFromEnv({
+      [E + "REASONING_INJECTION_DELIMITER_OPEN"]: "<a>",
+      [E + "REASONING_INJECTION_DELIMITER_CLOSE"]: "<b>",
+    });
+    expect(r.reasoningInjectionDelimiter).toEqual({ open: "<a>", close: "<b>" });
+  });
+  test("empty delimiter values are treated as unset (default delimiter)", () => {
+    const r = loadConfigFromEnv({ [E + "REASONING_INJECTION_DELIMITER_OPEN"]: "" });
+    expect(r.reasoningInjectionDelimiter).toEqual({ ...DEFAULT_CONFIG.reasoningInjectionDelimiter });
+  });
+  test("no delimiter env => default delimiter", () => {
+    expect(loadConfigFromEnv({}).reasoningInjectionDelimiter)
+      .toEqual({ ...DEFAULT_CONFIG.reasoningInjectionDelimiter });
+  });
   test("does not read process.env when an explicit env is passed", () => {
     // Ensures determinism: a stray process.env value must not leak in.
     const orig = process.env[E + "SHORTCUT"];

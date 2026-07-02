@@ -11,14 +11,14 @@
           "type": "Milestone",
           "id": "P2.M1",
           "title": "Configuration Extension — Directive Config Fields",
-          "status": "Researching",
+          "status": "Complete",
           "description": "Add reasoningInjection (boolean, default true) and reasoningInjectionDelimiter ({ open, close }) to all four config surfaces: Config interface, DEFAULT_CONFIG (deep-frozen), validateConfig (strict per-field guards), and loadConfigFromEnv (three new PI_STOP_THINKING_* env vars). This milestone has no behavioral impact until the builder consumes the fields in P2.M2.",
           "tasks": [
             {
               "type": "Task",
               "id": "P2.M1.T1",
               "title": "Add reasoningInjection + reasoningInjectionDelimiter to Config schema",
-              "status": "Researching",
+              "status": "Complete",
               "description": "Extend the Config interface, DEFAULT_CONFIG frozen defaults, and validateConfig strict guards with the two directive-related fields. The existing per-field strict fallback pattern (pick + guard) must be followed: one bad field never invalidates the rest, and invalid values silently fall back to defaults (Appendix K).",
               "subtasks": [
                 {
@@ -43,7 +43,7 @@
                   "type": "Subtask",
                   "id": "P2.M1.T1.S2",
                   "title": "Add env-var parsing for directive fields in loadConfigFromEnv",
-                  "status": "Researching",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [
                     "P2.M1.T1.S1"
@@ -72,14 +72,14 @@
               "type": "Task",
               "id": "P2.M2.T1",
               "title": "Implement snapshot rendering helper (renderReasoningText)",
-              "status": "Planned",
+              "status": "Researching",
               "description": "Add a pure, exported function that renders a frozen ReasoningBuffer snapshot (readonly ThinkingEntry[]) to plain text by offset-ordered concatenation of each entry's content string. This is the seed data for the directive — the buffer is opaque (no summarization, compression, or transformation).",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P2.M2.T1.S1",
                   "title": "Add renderReasoningText pure helper to src/request/builder.ts",
-                  "status": "Planned",
+                  "status": "Researching",
                   "story_points": 1,
                   "dependencies": [],
                   "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See plan/002_de5c3dc3c05f/architecture/directive_design.md §1 for the exact function specification. ThinkingEntry is defined in src/buffer/index.ts as `{ readonly offset: number; readonly timestamp: number; readonly content: string }`. snapshot() returns `readonly ThinkingEntry[]` (frozen array of frozen entry copies, already offset-ordered).\n2. INPUT: `reasoningSnapshot: readonly ThinkingEntry[]` — the frozen snapshot from ReasoningBuffer.snapshot(), passed by StreamProxy._launchReplacement (proxy.ts line 890).\n3. LOGIC: Implement PRD §53 h3.70 ('What is injected'): render the captured reasoning text as plain text from the frozen snapshot, offset-ordered, unmodified. No deltas, offsets, timestamps, or provider event envelopes are injected — only the rendered reasoning text. The buffer is opaque (§13.4 / h2.41: 'The extension does not interpret reasoning').\n   Function signature:\n   ```ts\n   export function renderReasoningText(entries: readonly ThinkingEntry[]): string\n   ```\n   Logic: `entries.map(e => e.content).join('')` — the array is already ordered by offset (append-order). Empty snapshot ([]) → '' (empty string → directive omitted by the gate in T2).\n   Purity: no side effects, no diagnostics calls, referentially transparent. Export from src/request/builder.ts (same module as RequestBuilder — avoids a new file for a one-liner).\n4. OUTPUT: An exported pure function `renderReasoningText(entries: readonly ThinkingEntry[]): string` that P2.M2.T2.S1's buildReplacement will call.\n5. MOCKING: No external services. Pure function over plain data.\n6. DOCS: [Mode A] JSDoc on the exported function documenting: purpose (PRD §53 'What is injected'), purity, and the opaque-buffer guarantee (no interpretation/compression). No standalone docs subtask.",

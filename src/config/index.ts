@@ -203,6 +203,19 @@ function envStringArray(raw: string | undefined): string[] | undefined {
  * environment without mutating the global one. Parsed values are re-validated by
  * {@link validateConfig}, so a loose parse can never yield an invalid {@link Config}.
  *
+ * **Configurable surface** (PRD §47 / §53):
+ *  - `PI_STOP_THINKING_REASONING_INJECTION` — enable/disable the directive (bool; default `true`).
+ *  - `PI_STOP_THINKING_REASONING_INJECTION_DELIMITER_OPEN` / `_CLOSE` — delimiter fence text
+ *    (non-empty strings; defaults are the §53 fence).
+ *  - `PI_STOP_THINKING_ENABLED` — master switch (bool; default `true`).
+ *  - `PI_STOP_THINKING_SHORTCUT` — key combo that raises the stop signal (string; default `ctrl+q`).
+ *  - `PI_STOP_THINKING_PROVIDERS` — provider ids for interruption (comma-separated; default `zai`).
+ *  - `PI_STOP_THINKING_MAX_REASONING_BUFFER_BYTES` — reasoning buffer ceiling (number; default `8388608`).
+ *  - `PI_STOP_THINKING_TRANSITION_TIMEOUT_MS` — transition timeout (number; default `5000`).
+ *  - `PI_STOP_THINKING_REPLACEMENT_TIMEOUT_MS` — replacement startup timeout (number; default `10000`).
+ *  - `PI_STOP_THINKING_DIAGNOSTICS` — diagnostics verbosity (string; default `error`).
+ *  - `PI_STOP_THINKING_TELEMETRY` — anonymous telemetry (bool; default `false`).
+ *
  * **Limitations** (see README → Configuration):
  *  - Config is env-var only — Pi passes no extension settings, so `settings.json` cannot
  *    configure this extension.
@@ -238,6 +251,20 @@ export function loadConfigFromEnv(env: Record<string, string | undefined> = proc
 
   const diag = env[ENV_PREFIX + "DIAGNOSTICS"];
   if (diag !== undefined && diag.length > 0) partial.diagnosticsLevel = diag;
+
+  const reasoningInjection = envBool(env[ENV_PREFIX + "REASONING_INJECTION"]);
+  if (reasoningInjection !== undefined) partial.reasoningInjection = reasoningInjection;
+
+  const rawDelimOpen = env[ENV_PREFIX + "REASONING_INJECTION_DELIMITER_OPEN"];
+  const rawDelimClose = env[ENV_PREFIX + "REASONING_INJECTION_DELIMITER_CLOSE"];
+  const delimOpen = rawDelimOpen !== undefined && rawDelimOpen.length > 0 ? rawDelimOpen : undefined;
+  const delimClose = rawDelimClose !== undefined && rawDelimClose.length > 0 ? rawDelimClose : undefined;
+  if (delimOpen !== undefined || delimClose !== undefined) {
+    partial.reasoningInjectionDelimiter = {
+      open: delimOpen ?? DEFAULT_CONFIG.reasoningInjectionDelimiter.open,
+      close: delimClose ?? DEFAULT_CONFIG.reasoningInjectionDelimiter.close,
+    };
+  }
 
   return validateConfig({ ...DEFAULT_CONFIG, ...partial });
 }

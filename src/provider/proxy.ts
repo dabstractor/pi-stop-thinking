@@ -917,6 +917,15 @@ export class StreamProxy {
         if (!firstSeen) {
           firstSeen = true;
           this._clearReplacementTimeout(); // first replacement event accepted → cancel the startup timeout
+          // Guard (race fix): the replacement-startup timeout may have fired (→ Failed) and aborted this
+          // stream WHILE this first event was already in flight. If we are no longer in Restarting, the
+          // transition already failed — do NOT drive the FSM further (beginSplice() would throw the illegal
+          // `Failed → Splicing` transition). Break out; the post-loop terminal synthesis + _terminate handle
+          // graceful teardown so output.result() never hangs.
+          if (this._controller.getState() !== "Restarting") {
+            this.diagnostics.warn("proxy.replacement.first-event-after-timeout", {});
+            break;
+          }
           // (f) Restarting → Splicing (PRD §16). Legal: we are in Restarting (just beginReplacement()'d).
           this._controller.beginSplice();
           // (g) Authority transfer — irreversible (PRD §39/§51). "splicing" == replacement authoritative.

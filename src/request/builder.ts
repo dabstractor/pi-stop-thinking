@@ -66,6 +66,27 @@ export interface ReplacementRequest {
 }
 
 /**
+ * Render the frozen reasoning snapshot to plain text (PRD §53 h3.70 "What is injected").
+ *
+ * Concatenates each entry's `content` verbatim, in offset/append order (the snapshot from
+ * {@link ReasoningBuffer.snapshot} is already offset-ordered). The result is the RAW reasoning
+ * text — no deltas, offsets, timestamps, or provider event envelopes are included; only the
+ * rendered text (PRD §53 h3.70).
+ *
+ * **Pure / opaque-buffer guarantee** (PRD §13.4 h2.41 — "The extension does not interpret
+ * reasoning"): this function does NOT summarize, compress, truncate, reformat, or filter
+ * content. It performs no side effects, no diagnostics, no I/O; it is referentially transparent
+ * and deterministic (same snapshot ⇒ identical string). An empty snapshot yields `""`, which the
+ * {@link RequestBuilder.buildReplacement} gate uses to omit the directive (PRD §53 h3.70).
+ *
+ * @param entries The frozen reasoning snapshot (already offset-ordered).
+ * @returns The concatenated reasoning text; `""` for an empty snapshot.
+ */
+export function renderReasoningText(entries: readonly ThinkingEntry[]): string {
+  return entries.map((entry) => entry.content).join("");
+}
+
+/**
  * Pure constructor of the thinking-disabled replacement provider request (PRD §31 / §53 / §25).
  */
 export class RequestBuilder {

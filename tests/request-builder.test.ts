@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { RequestBuilder } from "../src/request/builder";
+import { RequestBuilder, renderReasoningText } from "../src/request/builder";
 import type { ReplacementRequest } from "../src/request/builder";
 import { ReasoningBuffer } from "../src/buffer";
 import type { ThinkingEntry } from "../src/buffer";
@@ -252,6 +252,62 @@ describe("RequestBuilder — no network / no streaming", () => {
     expect(triple.model).toBeDefined();
     expect(triple.context).toBeDefined();
     expect(triple.options).toBeDefined();
+  });
+});
+
+describe("renderReasoningText — pure snapshot renderer (PRD §53 h3.70)", () => {
+  const mk = (offset: number, content: string, timestamp = offset): ThinkingEntry =>
+    ({ offset, timestamp, content });
+
+  test("empty snapshot → empty string", () => {
+    expect(renderReasoningText([])).toBe("");
+  });
+
+  test("single entry → its content verbatim", () => {
+    expect(renderReasoningText([mk(0, "hello")])).toBe("hello");
+  });
+
+  test("multiple entries → concatenated in offset/array order", () => {
+    expect(renderReasoningText([mk(0, "a"), mk(1, "b"), mk(2, "c")])).toBe("abc");
+  });
+
+  test("output contains ONLY content (no offset/timestamp leakage)", () => {
+    const out = renderReasoningText([mk(7, "reason"), mk(99, "ing")]);
+    expect(out).toBe("reasoning");
+    // Numbers 7 and 99 must not appear as text; verify no accidental envelope leakage.
+    expect(out.includes("7")).toBe(false);
+    expect(out.includes("99")).toBe(false);
+    expect(out.includes("offset")).toBe(false);
+    expect(out.includes("timestamp")).toBe(false);
+  });
+
+  test("content is NOT interpreted/trimmed (opaque buffer, §13.4 h2.41)", () => {
+    // Whitespace and newlines preserved verbatim — no normalization.
+    expect(renderReasoningText([mk(0, "  spaced\n"), mk(1, "end ")])).toBe("  spaced\nend ");
+  });
+
+  test("purity — no mutation of input entries/array", () => {
+    const entries = [mk(0, "x"), mk(1, "y")] as readonly ThinkingEntry[];
+    const snapshot = entries.map((e) => ({ ...e })); // defensive copy
+    renderReasoningText(snapshot);
+    expect(snapshot).toEqual(entries);          // unchanged
+    expect(snapshot.map((e) => e.content)).toEqual(["x", "y"]);
+  });
+
+  test("referentially transparent — same input ⇒ same output", () => {
+    const a = renderReasoningText([mk(0, "ab"), mk(1, "cd")]);
+    const b = renderReasoningText([mk(0, "ab"), mk(1, "cd")]);
+    expect(a).toBe(b);
+    expect(a).toBe("abcd");
+  });
+
+  test("works against a real frozen ReasoningBuffer.snapshot()", () => {
+    const { diag } = makeCaptureDiag();
+    const buffer = new ReasoningBuffer(diag, 1_000_000);
+    buffer.append("delta-one ");
+    buffer.append("delta-two");
+    buffer.freeze();
+    expect(renderReasoningText(buffer.snapshot())).toBe("delta-one delta-two");
   });
 });
 

@@ -4,7 +4,7 @@
       "type": "Phase",
       "id": "P2",
       "title": "Reasoning Reuse via Ephemeral Text Injection (ADR-006 / §53)",
-      "status": "Planned",
+      "status": "Researching",
       "description": "Implement the §53 Ephemeral Execution Directive elevated from optional to required by ADR-006 and INV-013. The existing MVP (P1.M1–P1.M8, fully built) captures reasoning in a ReasoningBuffer, freezes and snapshots it, and plumbs the snapshot into RequestBuilder.buildReplacement — but the builder explicitly does NOT read it. This phase closes that gap: the frozen snapshot is rendered to plain text, wrapped in a configurable delimiter fence, and injected as ephemeral, delimited reference context into a non-mutating COPY of the replacement request's Context, so the model conditions its answer on its own prior reasoning rather than answering from scratch. Two new config fields (reasoningInjection, reasoningInjectionDelimiter) gate and configure the directive. The change is confined to src/config/index.ts, src/request/builder.ts, src/provider/proxy.ts, and src/provider/decorator.ts, plus tests and docs. See plan/002_de5c3dc3c05f/architecture/ for validated findings.",
       "milestones": [
         {
@@ -187,14 +187,14 @@
           "type": "Milestone",
           "id": "P2.M3",
           "title": "Test Hardening & Changeset-Level Documentation",
-          "status": "Planned",
+          "status": "Researching",
           "description": "Comprehensive test coverage for the directive (content, gated fallback, non-mutation, privacy, formal invariants INV-013/INV-014) plus cross-cutting changeset-level documentation (README, CHANGELOG) that only makes sense once the full directive implementation is in place.",
           "tasks": [
             {
               "type": "Task",
               "id": "P2.M3.T1",
               "title": "Config + RequestBuilder directive test coverage",
-              "status": "Researching",
+              "status": "Complete",
               "description": "Extend the existing config tests for the two new fields and add comprehensive RequestBuilder directive tests covering content/format, gated fallback, non-mutation of original context/options, privacy (debug fields {}), and the formal invariants INV-013 (reasoning reused) and INV-014 (reasoning-disabled scope).",
               "subtasks": [
                 {
@@ -220,7 +220,7 @@
                   "type": "Subtask",
                   "id": "P2.M3.T1.S2",
                   "title": "RequestBuilder directive + invariant tests (INV-013, INV-014)",
-                  "status": "Researching",
+                  "status": "Complete",
                   "story_points": 2,
                   "dependencies": [
                     "P2.M2.T2.S1"
@@ -254,14 +254,14 @@
               "type": "Task",
               "id": "P2.M3.T2",
               "title": "Sync changeset-level documentation",
-              "status": "Planned",
+              "status": "Researching",
               "description": "Cross-cutting documentation updates that span the entire reasoning-reuse changeset and only make sense once P2.M1–P2.M2 are complete (Mode B). README.md gains a reasoning-reuse feature blurb, config/env table rows, and a how-it-works disambiguation between INPUT injection and OUTPUT stitching. CHANGELOG.md gains an entry for the directive.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P2.M3.T2.S1",
                   "title": "Update README.md for reasoning reuse + new config fields",
-                  "status": "Planned",
+                  "status": "Ready",
                   "story_points": 1,
                   "dependencies": [
                     "P2.M1.T1.S1",
@@ -294,7 +294,7 @@
                   "type": "Subtask",
                   "id": "P2.M3.T2.S2",
                   "title": "Add CHANGELOG.md entry for reasoning reuse directive",
-                  "status": "Planned",
+                  "status": "Researching",
                   "story_points": 0.5,
                   "dependencies": [
                     "P2.M1.T1.S1",

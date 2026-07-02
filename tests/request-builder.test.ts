@@ -4,6 +4,7 @@ import type { ReplacementRequest } from "../src/request/builder";
 import { ReasoningBuffer } from "../src/buffer";
 import type { ThinkingEntry } from "../src/buffer";
 import type { Diagnostics } from "../src/diagnostics";
+import { DEFAULT_CONFIG } from "../src/config";
 
 // --- test doubles ---------------------------------------------------------
 
@@ -45,6 +46,14 @@ function makeContext() {
     systemPrompt: "You are helpful.",
     messages: [{ role: "user" as const, content: "Hello" }],
   } as unknown as import("@earendil-works/pi-ai").Context;
+}
+
+/** Build a frozen ReasoningBuffer snapshot from the given deltas (mirrors the buffer lifecycle). */
+function makeSnapshot(diagnostics: Diagnostics, ...deltas: string[]): readonly ThinkingEntry[] {
+  const buffer = new ReasoningBuffer(diagnostics, 1_000_000);
+  for (const delta of deltas) buffer.append(delta);
+  buffer.freeze();
+  return buffer.snapshot();
 }
 
 // --- tests ----------------------------------------------------------------
@@ -326,5 +335,180 @@ describe("RequestBuilder — privacy guard (Appendix H)", () => {
     expect(builtEvents).toHaveLength(1);
     // Fields must be exactly {} — no content, no prompt, no options, no reasoning
     expect(builtEvents[0].fields).toEqual({});
+  });
+
+  test("fields remain {} even when directive injection is active (reasoning text present)", () => {
+    const { diag, events } = makeCaptureDiag();
+    const builder = new RequestBuilder(diag);
+    const model = makeModel();
+    const context = makeContext();
+    const options = { reasoning: "high", apiKey: "secret-key" } as import("@earendil-works/pi-ai").SimpleStreamOptions;
+    const snapshot = makeSnapshot(diag, "sensitive reasoning content"); // NON-empty → injection active
+
+    builder.buildReplacement(model, context, options, snapshot);
+
+    const builtEvents = events.filter((c) => c.event === "request.replacement-built");
+    expect(builtEvents).toHaveLength(1);
+    // Even with reasoning text + directive flowing through, the debug payload leaks NOTHING.
+    expect(builtEvents[0].fields).toEqual({});
+  });
+});
+
+describe("RequestBuilder — Ephemeral Execution Directive (§53 / ADR-006)", () => {
+  test("directive content — non-empty snapshot appends exactly one fenced UserMessage directive", () => {
+    const { diag } = makeCaptureDiag();
+    const builder = new RequestBuilder(diag); // DEFAULT: injection enabled, default delimiter
+    const model = makeModel();
+    const context = makeContext();
+    const options = { reasoning: "high", temperature: 0.7 } as import("@earendil-works/pi-ai").SimpleStreamOptions;
+    const snapshot = makeSnapshot(diag, "Step 1: analyze. ", "Step 2: conclude.");
+
+    const triple = builder.buildReplacement(model, context, options, snapshot);
+
+    // Augmented context is a NEW reference (§53 h3.73 fresh copy).
+    expect(triple.context).not.toBe(context);
+    // Exactly ONE directive message appended.
+    expect(triple.context.messages.length).toBe(context.messages.length + 1);
+    // The appended message is a UserMessage.
+    const directive = triple.context.messages[triple.context.messages.length - 1] as { role: string; content: string };
+    expect(directive.role).toBe("user");
+    // Content: rendered reasoning wrapped in the delimiter fence + non-continuation positioning.
+    expect(directive.content).toContain("Step 1: analyze. Step 2: conclude."); // rendered, offset-ordered
+    expect(directive.content.startsWith(DEFAULT_CONFIG.reasoningInjectionDelimiter.open)).toBe(true); // fenced open
+    expect(directive.content).toContain(DEFAULT_CONFIG.reasoningInjectionDelimiter.close); // fenced close
+    expect(directive.content).toContain("reference context only"); // §53 h3.72 positioning
+    expect(directive.content).toContain("Do not continue or extend reasoning."); // non-continuation
+  });
+
+  test("gated fallback — reasoningInjection: false returns the SAME context reference (no directive)", () => {
+    const { diag } = makeCaptureDiag();
+    const builder = new RequestBuilder(diag, false); // injection DISABLED
+    const model = makeModel();
+    const context = makeContext();
+    const options = { reasoning: "high" } as import("@earendil-works/pi-ai").SimpleStreamOptions;
+    const snapshot = makeSnapshot(diag, "reasoning that should be ignored"); // non-empty
+
+    const triple = builder.buildReplacement(model, context, options, snapshot);
+
+    // Gated fallback (disabled): context IS the same reference; no directive appended.
+    expect(triple.context).toBe(context);
+    expect(triple.context.messages.length).toBe(context.messages.length);
+    // INV-014 holds regardless of the injection gate.
+    expect(triple.options.reasoning).toBeUndefined();
+  });
+
+  test("gated fallback — empty snapshot returns the SAME context reference (no directive)", () => {
+    const { diag } = makeCaptureDiag();
+    const builder = new RequestBuilder(diag); // injection DEFAULT true
+    const model = makeModel();
+    const context = makeContext();
+    const options = { reasoning: "high" } as import("@earendil-works/pi-ai").SimpleStreamOptions;
+
+    const triple = builder.buildReplacement(model, context, options, []); // empty snapshot
+
+    // Gated fallback (empty): context IS the same reference; no directive appended.
+    expect(triple.context).toBe(context);
+    expect(triple.context.messages.length).toBe(context.messages.length);
+  });
+
+  test("INV-013 — by default (constructor defaults), a non-empty snapshot is reused, not discarded", () => {
+    const { diag } = makeCaptureDiag();
+    const builder = new RequestBuilder(diag); // NO explicit injection arg → DEFAULT true (INV-013)
+    const model = makeModel();
+    const context = makeContext();
+    const options = { reasoning: "high" } as import("@earendil-works/pi-ai").SimpleStreamOptions;
+    const snapshot = makeSnapshot(diag, "captured material reasoning");
+
+    const triple = builder.buildReplacement(model, context, options, snapshot);
+
+    // INV-013: reasoning is reused — the directive is present (augmented context).
+    expect(triple.context).not.toBe(context);
+    expect(triple.context.messages.length).toBeGreaterThan(context.messages.length);
+    const directive = triple.context.messages[triple.context.messages.length - 1] as { content: string };
+    expect(directive.content).toContain("captured material reasoning");
+  });
+
+  test("custom delimiter — the builder renders reasoning inside the supplied open/close fence", () => {
+    const { diag } = makeCaptureDiag();
+    const builder = new RequestBuilder(diag, true, { open: "<<<OPEN>>>", close: "<<<CLOSE>>>" });
+    const model = makeModel();
+    const context = makeContext();
+    const options = {} as import("@earendil-works/pi-ai").SimpleStreamOptions;
+    const snapshot = makeSnapshot(diag, "MYTEXT");
+
+    const triple = builder.buildReplacement(model, context, options, snapshot);
+
+    const directive = triple.context.messages[triple.context.messages.length - 1] as { content: string };
+    expect(directive.content).toContain("<<<OPEN>>>");
+    expect(directive.content).toContain("<<<CLOSE>>>");
+    expect(directive.content).toContain("MYTEXT");
+  });
+});
+
+describe("RequestBuilder — directive non-mutation & INV-014 (§53 h3.73)", () => {
+  test("non-mutation — original context, messages array, systemPrompt, and options are unchanged after injection", () => {
+    const { diag } = makeCaptureDiag();
+    const builder = new RequestBuilder(diag);
+    const model = makeModel();
+    const context = makeContext();
+    const originalMessagesRef = context.messages; // capture BEFORE the call
+    const options = { reasoning: "high", temperature: 0.7 } as import("@earendil-works/pi-ai").SimpleStreamOptions;
+    const snapshot = makeSnapshot(diag, "prior reasoning");
+
+    builder.buildReplacement(model, context, options, snapshot);
+
+    // §53 h3.73: the directive is ephemeral — original context & options are NOT mutated.
+    expect(context.messages).toBe(originalMessagesRef);    // same messages array reference
+    expect(context.messages.length).toBe(1);               // unchanged length
+    expect(context.systemPrompt).toBe("You are helpful."); // untouched
+    expect(options.reasoning).toBe("high");                // original reasoning level intact
+    expect(options.temperature).toBe(0.7);                 // original sampling intact
+    expect("maxTokens" in options).toBe(false);            // no new keys added to original options
+  });
+
+  test("INV-014 — triple.options.reasoning === undefined (fresh options); directive message carries NO reasoning field", () => {
+    const { diag } = makeCaptureDiag();
+    const builder = new RequestBuilder(diag);
+    const model = makeModel();
+    const context = makeContext();
+    const options = { reasoning: "high" } as import("@earendil-works/pi-ai").SimpleStreamOptions;
+    const snapshot = makeSnapshot(diag, "some reasoning");
+
+    const triple = builder.buildReplacement(model, context, options, snapshot);
+
+    // INV-014: reasoning disabled for EXACTLY this one request via a FRESH options object.
+    expect(triple.options).not.toBe(options);              // fresh object (not the original ref)
+    expect(triple.options.reasoning).toBeUndefined();      // reasoning OFF for the replacement
+    expect(options.reasoning).toBe("high");                // original options UNMUTATED
+    // The directive message is plain message CONTENT — it carries no reasoning-level field.
+    const directive = triple.context.messages[triple.context.messages.length - 1] as Record<string, unknown>;
+    expect("reasoning" in directive).toBe(false);
+    expect(Object.keys(directive).sort()).toEqual(["content", "role", "timestamp"]);
+  });
+});
+
+describe("RequestBuilder — maxTokens bound (§25.6 h2.97)", () => {
+  test("maxTokens — caller value preserved; bounded default applied only when absent", () => {
+    const { diag } = makeCaptureDiag();
+    const builder = new RequestBuilder(diag);
+    const model = makeModel();
+    const context = makeContext();
+    const snapshot = makeSnapshot(diag, "x");
+
+    // Absent maxTokens → bounded default (DEFAULT_REPLACEMENT_MAX_TOKENS = 16384).
+    const absent = builder.buildReplacement(
+      model, context,
+      { temperature: 0.5 } as import("@earendil-works/pi-ai").SimpleStreamOptions,
+      snapshot,
+    );
+    expect(absent.options.maxTokens).toBe(16384);
+
+    // Caller-supplied maxTokens → preserved verbatim.
+    const present = builder.buildReplacement(
+      model, context,
+      { maxTokens: 4096 } as import("@earendil-works/pi-ai").SimpleStreamOptions,
+      snapshot,
+    );
+    expect(present.options.maxTokens).toBe(4096);
   });
 });

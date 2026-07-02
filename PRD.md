@@ -46,6 +46,8 @@ From the user's perspective:
 
 Internally, the extension may perform multiple provider requests in order to produce that experience.
 
+When the reasoning stream is interrupted, the reasoning captured so far is **not discarded**. It is injected as ephemeral, delimited reference context into the replacement (thinking-disabled) request, so the model conditions its answer on its own prior reasoning rather than starting from scratch. This reuse is a client-side mitigation; it is not a server-side resumption of the interrupted inference (see ADR-001 and §53 Ephemeral Execution Directive).
+
 The implementation details are considered an internal concern and must never leak into the visible interaction.
 
 ---
@@ -195,9 +197,11 @@ The extension shall not attempt to alter the server-side inference process.
 
 ## NG2
 
-Resuming a partially completed reasoning process.
+Server-side resumption or continuation of a partially completed reasoning process.
 
-No provider currently exposes resumable reasoning state.
+No provider exposes resumable reasoning state, and the live server-side inference (its KV-cache / activation state) cannot be paused and resumed through any documented OpenAI-compatible API (see ADR-001). Server-side continuation of the interrupted inference therefore remains a true non-goal.
+
+The captured reasoning **text**, however, is not wasted: it is reused client-side via ephemeral input injection into the replacement request (see §53 Ephemeral Execution Directive). This is replay of captured text, not resumption of the live inference.
 
 ---
 
@@ -270,6 +274,8 @@ The extension shall treat reasoning interruption as a transport orchestration pr
 Multiple provider requests may be required internally.
 
 This implementation detail shall remain invisible to the user.
+
+**Mitigation.** Because the live inference cannot be continued server-side, the extension mitigates the loss of the interrupted reasoning by reusing the **captured reasoning text** client-side. The frozen `ReasoningBuffer` snapshot is injected as ephemeral, delimited reference context into the replacement request so the model conditions its answer on its own prior reasoning (see §53 Ephemeral Execution Directive). This is **not** server-side continuation: it is a textual replay of captured reasoning into a fresh request. It is therefore lower-fidelity than a native interrupt/resume feature would be. Empirically (GLM-5.2), injecting the **complete** captured reasoning made the replacement answer match full-thinking quality on tested reasoning problems; the benefit is contingent on capturing the reasoning steps material to the answer — an early interruption that captures little material reasoning yields a from-scratch-quality answer, so quality scales with how far reasoning progressed before the shortcut.
 
 ---
 
@@ -375,6 +381,43 @@ Specifically:
 * identical assistant messages
 
 This requirement exists to ensure that the extension introduces effectively zero regression risk for users who never invoke the feature.
+
+---
+
+# ADR-006
+
+## Reasoning Reuse via Ephemeral Text Injection
+
+### Status
+
+Accepted.
+
+### Context
+
+z.ai offers no server-side "stop thinking, keep generating" mechanism (ADR-001), so any client-side interrupt is structurally an abort followed by a fresh request. The original MVP behavior discarded the reasoning streamed before the shortcut: the replacement request was sent thinking-disabled with the original context only, so the model answered from scratch and the compute already spent on reasoning was wasted. Empirically (GLM-5.2), a from-scratch thinking-disabled answer is measurably weaker than a full-thinking answer on reasoning-dependent tasks, so discard is a real quality regression, not merely a lost nicety.
+
+### Decision
+
+Capture the reasoning streamed before the shortcut (the `ReasoningBuffer`) and **inject it as ephemeral, clearly-delimited plain-text reference context into the thinking-disabled replacement request** — the Ephemeral Execution Directive (§53). The model reads its own prior reasoning and produces an answer conditioned on it. Reasoning remains OFF for that single request (INV-014); the directive is ephemeral and is not persisted into conversation history as a new or modified message. The same captured snapshot is separately stitched into the persisted assistant message for display (output stitching).
+
+### Empirical basis
+
+Validated by direct API probes against GLM-5.2 (see Appendix P). Injecting the *complete* captured reasoning made the replacement answer match full-thinking quality on tested reasoning problems; the benefit scales with how much material reasoning was captured before the shortcut.
+
+### Consequences
+
+* **Positive** — answer quality is preserved in proportion to how far reasoning progressed; the compute spent thinking is not wasted.
+* **Lower fidelity than a native feature** — this is a textual replay into a fresh request, not a continuation of the live inference, so it cannot match a server-side interrupt/resume (ADR-001).
+* **Capture-fragility** — an early interruption that captures little material reasoning degrades gracefully to a from-scratch-quality answer. Quality is best-effort and proportional to capture, not guaranteed.
+* **Input cost** — the injected reasoning adds tokens to the replacement's input (re-prefill). This is mitigated by z.ai's prefix cache, which survives the thinking toggle (Appendix P), so the shared conversation prefix is re-prefilled from cache; only the injected reasoning tail is un-cached.
+* **Invariant** — reasoning-disabled scope (INV-014) must hold: exactly one request (the replacement) has thinking off.
+
+### Alternatives considered
+
+1. **Discard the reasoning (original MVP).** Rejected — empirically lower quality and wastes the compute already spent.
+2. **Native `reasoning_content` round-trip** (send the prior reasoning back as a provider-native field). Rejected — z.ai's `reasoning_content` is output-only (no documented input-reuse path; analogous to DeepSeek), and z.ai has no signed-thinking block mechanism like Anthropic's.
+3. **Server-side continuation (Claude-style).** Rejected — z.ai exposes no such mechanism (ADR-001); this is the only approach that would deliver true immediacy and full-fidelity reuse, and it is unavailable.
+4. **Plain-text ephemeral injection.** Chosen — universally possible (it is just context text), empirically effective, and compatible with the thinking-disabled scoping invariant.
 
 ---
 
@@ -516,6 +559,8 @@ The transition should appear as though the model simply stopped thinking and beg
 
 No visible restart should occur.
 
+Internally, the reasoning captured before the shortcut is injected as ephemeral reference context into the replacement request so the model's answer reuses that prior reasoning (see §53). This is invisible to the user.
+
 ---
 
 ## Failure Flow
@@ -645,7 +690,7 @@ The implementation is divided into four primary modules:
 
 1. **Provider Decorator** — wraps Pi's built-in `streamSimple` implementation, delegates by default, and activates interception only for supported z.ai models.
 
-2. **Stream Proxy** — forwards `AssistantMessageEvent`s, captures reasoning output, suppresses premature terminal events during interruption, and splices the replacement generation into a single downstream stream.
+2. **Stream Proxy** — forwards `AssistantMessageEvent`s, captures reasoning output into a `ReasoningBuffer`, suppresses premature terminal events during interruption, and splices the replacement generation into a single downstream stream. The captured reasoning snapshot is consumed by the replacement request (injected as ephemeral input context) **and** stitched into the persisted assistant message for display (see §53).
 
 3. **Transition State Machine** — owns interruption state, lifecycle transitions, invariants, and recovery behavior. It is the sole authority for determining when and how a Stop Thinking operation proceeds.
 
@@ -1002,6 +1047,8 @@ one response
 
 must always hold.
 
+The reasoning captured by the buffer serves two distinct, non-overlapping purposes: it is injected as ephemeral input context into the replacement request so the model reuses it (INPUT injection, see §53), and it is stitched into the persisted/displayed assistant message so the user sees it (OUTPUT stitching). Both occur; neither substitutes for the other.
+
 ---
 
 # 13.3 Transition State Machine
@@ -1058,6 +1105,8 @@ Its contents are intentionally opaque.
 The extension does not interpret reasoning.
 
 It merely preserves it.
+
+The frozen snapshot feeds the Ephemeral Execution Directive (§53): it is injected into the replacement request as ephemeral reference context so the model conditions its answer on the prior reasoning. The same snapshot is also stitched into the persisted assistant message for display (OUTPUT stitching). These are two separate uses of one captured snapshot.
 
 ---
 
@@ -1210,7 +1259,7 @@ capture final reasoning
 
 ↓
 
-start Provider B
+start Provider B (reasoning injected, thinking disabled)
 
 ↓
 
@@ -1504,7 +1553,7 @@ Only replacement provider may emit terminal completion.
 
 ## Answering
 
-Reasoning disabled permanently.
+Reasoning disabled for this replacement request only (see Reasoning-Disabled Scope).
 
 Only answer events forwarded.
 
@@ -1521,6 +1570,22 @@ Cleanup must succeed even if telemetry fails.
 Wrapper returns Pi-compatible failure.
 
 Internal state always reset before exit.
+
+---
+
+## Reasoning-Disabled Scope
+
+**INV: Reasoning-Disabled Scope.** Reasoning is disabled (`reasoning: undefined`) for **exactly one** request — the replacement request — and nothing else.
+
+All of the following hold:
+
+* The `reasoning: undefined` override is applied to the **replacement request's options object only**, which is a freshly-constructed object (`{ ...originalOptions, reasoning: undefined }`). The original request's options object is **never mutated**.
+* The extension **must not** modify Pi's session-level or default thinking level (`defaultThinkingLevel` / session thinking state). Every subsequent turn and every other request retains the user's configured reasoning level.
+* The interrupted primary request already executed with reasoning **on** and is unaffected by the transition.
+* All other providers and models are unaffected (pass-through).
+* The injected reasoning text present in conversation history must **not** cause later reasoning-on requests to behave as though thinking is off. Reasoning on/off is a per-request option that is independent of message content.
+
+This invariant is normative and is restated in Appendix O as INV-014.
 
 ---
 
@@ -2058,6 +2123,8 @@ The buffer preserves reasoning emitted before interruption.
 
 It exists solely to maximize continuity.
 
+The frozen snapshot is consumed in two distinct ways: (a) injected as ephemeral input context into the replacement request so the model reuses the prior reasoning (INPUT injection, §53), and (b) stitched into the persisted/displayed assistant message so the user sees it (OUTPUT stitching).
+
 ---
 
 ## 23.2 Design
@@ -2154,6 +2221,8 @@ It represents the continuation of the existing logical interaction.
 
 It is not a new user interaction.
 
+The replacement request reuses the reasoning captured before interruption: that snapshot is injected as ephemeral, delimited reference context so the model conditions its answer on the prior reasoning (§53 Ephemeral Execution Directive).
+
 ---
 
 ## 25.2 Design Goals
@@ -2173,6 +2242,8 @@ Delegate as much work as possible to Pi.
 The replacement request shall reuse the same conversational context as the interrupted request.
 
 No conversation rewriting should occur unless required to preserve correctness.
+
+In addition to reusing the conversational context, the replacement request reuses the captured reasoning by injecting it as ephemeral reference context (see §53). This is input injection (the model uses the reasoning); it is distinct from the output stitching that places the reasoning into the persisted assistant message for display.
 
 ---
 
@@ -2198,6 +2269,8 @@ ephemeral
 
 The augmentation must exist only for the replacement request.
 
+The Ephemeral Execution Directive (§53) — the captured reasoning plus a clearly delimited framing that positions it as reference context — is applied as part of this per-request, ephemeral augmentation. It must not be persisted as a new or modified message in conversation history.
+
 ---
 
 ## 25.6 Thinking Configuration
@@ -2207,6 +2280,12 @@ The replacement request shall disable reasoning.
 The exact mechanism is implementation-specific and depends upon the provider payload.
 
 For z.ai this includes disabling the provider's reasoning mode and omitting any reasoning effort configuration that would reactivate thinking.
+
+Thinking is disabled for this single replacement request only (see §17 Reasoning-Disabled Scope and INV-014): the override is applied to a freshly-constructed replacement options object (`{ ...originalOptions, reasoning: undefined }`) and must not mutate the original request's options or Pi's session/default thinking level.
+
+Disabling reasoning is paired with **reusing** the captured reasoning: the frozen snapshot is injected as ephemeral reference context via the Ephemeral Execution Directive (§53) so the model's answer conditions on the prior reasoning. Thus the replacement thinks **off** yet answers **informed**.
+
+Implementation notes (provider option keys, validated against pi-ai v0.80.3): thinking is toggled via `options.reasoning` on the replacement options object — `undefined` disables it, the user's level (e.g. `"high"`) enables it. Do **not** use `options.reasoningEffort` for this: the z.ai provider derives the effort from `options.reasoning`, and a directly-supplied `reasoningEffort` is silently dropped, leaving thinking in the wrong state. Additionally, set a bounded `maxTokens` on the replacement; z.ai does **not** reliably enforce `maxTokens` (observed over-generation well past the limit), so treat the bound as best-effort and rely on the stream's terminal event, not the token cap, for completion.
 
 ---
 
@@ -2237,6 +2316,8 @@ Those are different operations.
 The implementation shall avoid introducing verbose instructions that materially alter the assistant's behavior beyond the singular objective of ending the reasoning phase and producing the best available answer.
 
 Any injected guidance should therefore be treated as an execution directive rather than an attempt to redefine the user's request.
+
+In particular, the captured reasoning injected via the Ephemeral Execution Directive (§53) is positioned as read-only reference context. Its framing must not read as a continuation prompt that invites the model to resume or extend reasoning; it presents prior reasoning to be drawn upon while answering, not work to be continued.
 
 The user asked one question.
 
@@ -2426,7 +2507,7 @@ Memory limits.
 
 CPU overhead.
 
-Latency budget.
+Latency budget. The interrupt-to-answer wait has two parts: (1) the reasoning **capture** cost is already paid — it is the thinking the user was watching when they pressed the shortcut, so it adds no incremental wait; (2) the replacement **answer** call, whose latency is its time-to-first-token (TTFT) plus answer streaming. The replacement shares the conversation prefix with the interrupted primary, and z.ai's prompt-prefix cache survives the thinking toggle (validated: a thinking-off replacement hits the cache populated by the thinking-on primary), so the prefix is re-prefilled from cache rather than cold. Measured on GLM-5.2, cache reduced replacement TTFT ~15% at ~10K-token prefixes and ~29% at ~31K, scaling with prefix length. A multi-second TTFT floor remains (queueing/scheduling/decode-setup plus the un-cached tail and any injected-reasoning tokens), so Claude-like ~2s "immediacy" is **not** achievable on z.ai via client-side abort-and-replace; the realistic target is single-digit seconds with an answer informed by the prior reasoning.
 
 Maximum allocations.
 
@@ -2781,7 +2862,11 @@ Original user prompt preserved.
 
 Conversation preserved.
 
-Thinking disabled.
+Thinking disabled for this request only (see §17 Reasoning-Disabled Scope).
+
+The reasoning snapshot is used to construct the injected context (Ephemeral Execution Directive, §53): `buildReplacement` consumes the `reasoningSnapshot` argument to build the delimited reference-context block placed into the replacement request. The snapshot argument is not optional or unused; without it the directive is omitted and answer quality degrades to a from-scratch response.
+
+The injected directive is ephemeral: it exists only within the replacement request and is not persisted as a new or modified message.
 
 System augmentation optional.
 
@@ -2805,7 +2890,9 @@ Retries
 
 ## Responsibility
 
-Capture reasoning emitted prior to interruption.
+Capture reasoning emitted prior to interruption and expose an immutable snapshot.
+
+The frozen snapshot is consumed by the Ephemeral Execution Directive (§53): it is injected as ephemeral reference context into the replacement request (INPUT injection) and, separately, stitched into the persisted assistant message for display (OUTPUT stitching).
 
 ---
 
@@ -3143,6 +3230,8 @@ Reasoning frozen.
 
 Replacement request accepted.
 
+The replacement request carries the injected reasoning snapshot (§53) so the replacement stream's answer is conditioned on the prior reasoning.
+
 ---
 
 Until then
@@ -3168,6 +3257,8 @@ ReasoningBuffer frozen.
 After replacement
 
 ReasoningBuffer read-only.
+
+The frozen snapshot is injected (consumed) into the replacement request input as ephemeral reference context (§53). This is INPUT injection, distinct from the OUTPUT stitching that places the reasoning into the persisted assistant message.
 
 ---
 
@@ -3492,12 +3583,21 @@ telemetryEnabled
 
 maximumReasoningBuffer
 
+reasoningInjection
+
+reasoningInjectionDelimiter
+
 allowExperimentalProviderFlags
 ```
 
 Every option shall have deterministic defaults.
 
 Configuration changes shall apply only to future requests unless explicitly documented otherwise.
+
+The directive-related options are:
+
+* `reasoningInjection` — enable/disable the Ephemeral Execution Directive (§53), i.e. injecting the captured reasoning snapshot into the replacement request as ephemeral reference context. Default: `true`.
+* `reasoningInjectionDelimiter` — the label/delimiter text used to open and close the injected reasoning block. Default: a deterministic, clearly-labeled fence. Changing this does not change the shortcut (`Ctrl+Q`) or the env-var config mechanism.
 
 ---
 
@@ -3534,6 +3634,8 @@ The implementation shall be considered production-ready only if all of the follo
 ✓ All state machine transitions validated.
 
 ✓ No regression in normal Pi provider behavior.
+✓ Captured reasoning is reused (best-effort, proportional to capture): when adequate material reasoning was captured before interruption, the replacement answer conditions on the injected reasoning snapshot (INPUT injection via §53) and matches full-thinking quality; an early interruption that captures little material reasoning degrades gracefully to a from-scratch-quality answer. (Validated empirically on GLM-5.2: complete-capture matched full thinking on tested reasoning problems; partial capture truncated before the material step yielded no gain.)
+✓ Reasoning-disabled scope: reasoning is disabled for exactly one request (the replacement); the next turn's request still carries the user's configured reasoning level, and the primary request and all other requests are unaffected.
 
 ---
 
@@ -3634,7 +3736,7 @@ Reasoning tracker.
 
 Shortcut enablement.
 
-Reasoning buffer.
+Reasoning buffer (snapshot later feeds the Ephemeral Execution Directive, §53).
 
 ### Success Criteria
 
@@ -3670,15 +3772,20 @@ Launch replacement request.
 
 ### Deliverables
 
-RequestBuilder.
+RequestBuilder (consumes `reasoningSnapshot` to build the Ephemeral Execution Directive, §53).
 
 Replacement invocation.
 
-Thinking disabled.
+Thinking disabled for this request only.
+Reasoning injected as ephemeral reference context.
 
 ### Success Criteria
 
 Replacement begins successfully.
+
+The replacement answer conditions on the injected reasoning snapshot.
+
+The `reasoning: undefined` override is applied to the replacement options only and does not mutate the original options or Pi's session/default thinking level (§17 Reasoning-Disabled Scope).
 
 ---
 
@@ -4008,9 +4115,9 @@ Provider.
 
 Modify:
 
-Thinking configuration.
+Thinking configuration (disable reasoning for this request only).
 
-Ephemeral execution directive.
+Inject: the captured reasoning via the Ephemeral Execution Directive (§53 below).
 
 Internal transition metadata.
 
@@ -4024,13 +4131,49 @@ Session identity.
 
 Visible history.
 
+Pi's session/default thinking level.
+
 ---
 
 ## Ephemeral Execution Directive
 
-The replacement request may include a transient execution directive instructing the model to immediately produce its best available answer based on the current conversational context rather than initiating a new extended reasoning phase.
+The Ephemeral Execution Directive is the first-class mechanism by which the reasoning captured before interruption is **reused** rather than discarded. The frozen `ReasoningBuffer` snapshot is injected into the replacement request's input context as **ephemeral, clearly-delimited plain text**, so the model reads its own prior reasoning and produces an answer conditioned on it. This is INPUT injection (the model uses the reasoning); it is distinct from OUTPUT stitching, which merges the reasoning into the persisted/displayed assistant message so the user sees it. Both occur; they serve different purposes and must not be conflated.
 
-This directive shall exist only within the replacement request and shall not become part of the persisted conversation history.
+### What is injected
+
+The directive payload is the captured reasoning text rendered as plain text from the frozen snapshot (offset-ordered, unmodified — the buffer does not interpret, summarize, or compress reasoning). No deltas, offsets, timestamps, or provider event envelopes are injected; only the rendered reasoning text.
+
+If `reasoningInjection` is disabled in configuration (§47), or the snapshot is empty, the directive is omitted and the replacement behaves as a from-scratch thinking-disabled answer.
+
+### Delimiter format
+
+The reasoning must be wrapped in a deterministic, clearly-labeled fence so the model can unambiguously distinguish it from the live prompt and conversation. The delimiter text is configurable via `reasoningInjectionDelimiter` (§47); the default renders approximately as:
+
+```text
+---
+[Prior reasoning captured before you were asked to stop thinking]
+<rendered reasoning text>
+[End of prior reasoning]
+---
+
+Using the prior reasoning above as reference context only, produce your best available answer to the user's request now. Do not continue or extend reasoning.
+```
+
+### Positioning (non-continuation requirement)
+
+The directive must be positioned as **read-only reference context**, never as a continuation prompt. Its framing must not invite the model to resume, extend, or further elaborate the reasoning chain. It presents prior reasoning to be drawn upon while answering, not work to be continued (see §26 Prompt Morphing Philosophy).
+
+### Ephemeral / scoping rules
+
+The directive is **ephemeral**: it exists only within the single replacement request.
+
+* It must **not** be persisted into conversation history as a new or modified message. The persisted assistant message carries the reasoning via OUTPUT stitching only.
+* It must **not** alter the user's prompt, assistant history, or visible history.
+* It must **not** mutate the original request's options object.
+
+### Reasoning-disabled scope (invariant)
+
+Reasoning is disabled (`reasoning: undefined`) for **exactly one** request — this replacement — and nothing else (see §17 Reasoning-Disabled Scope and INV-014). The `reasoning: undefined` override is applied to the replacement request's freshly-constructed options object only; it does not mutate the original options or Pi's session/default thinking level. Because the injected reasoning lives in message content only and reasoning on/off is a per-request option, the presence of injected reasoning text in history must not cause later reasoning-on requests to behave as though thinking is off.
 
 ---
 
@@ -4092,7 +4235,7 @@ TransitionController.
 
 ReasoningBuffer.
 
-RequestBuilder.
+RequestBuilder (directive injection from `reasoningSnapshot`).
 
 ShortcutManager.
 
@@ -4121,6 +4264,10 @@ Provider failures.
 Authentication failures.
 
 Timeouts.
+
+Reasoning reuse via injection (replacement answer conditions on the captured reasoning snapshot; directive omitted when disabled or empty).
+
+Reasoning-disabled scope (only the replacement request is thinking-off; next turn retains the user's configured reasoning level; original request options unmutated).
 
 ---
 
@@ -4155,6 +4302,8 @@ No duplicate start.
 No duplicate end.
 
 No leaked buffers.
+
+Reasoning is disabled for exactly one request (the replacement) and no other request, session, or provider.
 
 ---
 
@@ -4306,6 +4455,8 @@ Violation of any constraint constitutes an architectural regression.
 □ No additional user interaction.
 
 □ Transition succeeds under expected z.ai latency.
+□ Captured reasoning is reused via ephemeral input injection (§53); the replacement answer conditions on it.
+□ Reasoning-disabled scope holds: only the replacement is thinking-off; the next turn retains the user's configured reasoning level, original options are unmutated, and other providers are unaffected.
 
 ---
 
@@ -4322,6 +4473,7 @@ Violation of any constraint constitutes an architectural regression.
 □ Abort races tested.
 
 □ Duplicate event suppression verified.
+□ Injected directive is ephemeral: not persisted as a new/modified message; persisted reasoning reaches history only via output stitching.
 
 ---
 
@@ -4356,6 +4508,12 @@ Violation of any constraint constitutes an architectural regression.
 **Captured Provider** — The original Pi provider implementation obtained before wrapper registration.
 
 **Delegation** — Forwarding a request to the captured provider without modification.
+
+**Ephemeral Execution Directive** — The mechanism (§53) by which the captured reasoning is injected as ephemeral, delimited reference context into the replacement request so the model reuses its prior reasoning. It exists only for the single replacement request and is not persisted as a new/modified message.
+
+**Input Injection** — Use of the captured reasoning as model-facing input context (the model reads and conditions on it). Contrast with **Output Stitching**.
+
+**Output Stitching** — Use of the captured reasoning as user-facing content merged into the persisted/displayed assistant message so the user sees the prior reasoning. Contrast with **Input Injection**.
 
 **Observational Equivalence** — Property whereby downstream behavior is indistinguishable from the built-in implementation when the feature is inactive.
 
@@ -5213,6 +5371,12 @@ replacementStartupTimeoutMs: 10000
 
 maximumReasoningBufferBytes: 8388608
 
+reasoningInjection: true
+
+reasoningInjectionDelimiter:
+  open: "---\n[Prior reasoning captured before you were asked to stop thinking]"
+  close: "[End of prior reasoning]\n---"
+
 telemetry:
   enabled: false
 
@@ -5459,3 +5623,43 @@ Every allocated transition resource shall have exactly one owning component and 
 ## INV-012
 
 The implementation shall preserve Pi's logical conversation model of one user request producing one assistant response regardless of the number of provider requests executed internally.
+
+---
+
+## INV-013
+
+The reasoning captured before interruption shall be reused, not discarded: the frozen `ReasoningBuffer` snapshot shall be injected as ephemeral, delimited reference context into the replacement request (the Ephemeral Execution Directive, §53) so the model's answer conditions on it. This input injection is distinct from output stitching, which places the reasoning into the persisted assistant message for display.
+
+---
+
+## INV-014
+
+Reasoning is disabled for exactly one request — the replacement request — and nothing else. The `reasoning: undefined` override is applied to the replacement request's freshly-constructed options object only (`{ ...originalOptions, reasoning: undefined }`); the original request's options, Pi's session/default thinking level, the primary request, and all other providers/models are unaffected. Because reasoning on/off is a per-request option independent of message content, injected reasoning text in history shall not cause later reasoning-on requests to behave as though thinking is off.
+
+---
+
+# Appendix P — Empirical Basis
+
+The load-bearing design decisions in this PRD — chiefly ADR-006 (reasoning reuse via injection) and the Part 9 latency budget — are grounded in direct measurements against the z.ai GLM-5.2 API, exercised through Pi's own `openai-completions` provider (`streamSimple`) so the requests are byte-faithful to production. These are **point measurements from controlled probes, not statistical claims**; the model, endpoint, and caching/enforcement behavior may change. Re-run these probes before relying on any specific number.
+
+## P.1 Reasoning reuse (answer quality)
+
+* **Method.** Three short reasoning puzzles with definite, verifiable answers, each run three ways: **A** = thinking-off, from scratch; **B** = thinking-off, with *partial* captured reasoning injected as delimited plain text; **C** = thinking-on, to completion. A fourth condition **B2** injected the *complete* captured reasoning.
+* **Result.** On the puzzle where A failed (wrong answer), B recovered the correct answer when the captured reasoning happened to include the material step; in a run where the partial capture was truncated before that step, B stayed wrong (matching A). **B2 matched C on all three puzzles.**
+* **Conclusion.** Injecting the captured reasoning as plain text causes the replacement answer to condition on it; effectiveness is proportional to how much material reasoning was captured. Grounds ADR-006 and the best-effort, proportional-to-capture acceptance criterion in §48.
+
+## P.2 Prompt caching and replacement latency
+
+* z.ai caches by **prefix content automatically** (cache reads scale with the prefix; verified `cacheRead` ≈ full prefix on warm hits and `0` on genuinely-cold prefixes with a unique nonce at token 0).
+* The cache **survives the thinking toggle**: a thinking-off replacement request hits the cache populated by a thinking-on primary with the same conversation prefix.
+* **TTFT reduction from cache** (GLM-5.2, thinking-off replacement): ~15% at a ~10K-token prefix, ~29% at a ~31K-token prefix, scaling with prefix size.
+* A **multi-second TTFT floor remains** regardless of caching (queueing/scheduling/decode-setup plus the un-cached tail and any injected-reasoning tokens), so Claude-like ~2s "immediacy" is not achievable via client-side abort-and-replace. Grounds the Part 9 latency budget.
+
+## P.3 Implementation hazards observed
+
+* **Option key.** Thinking is toggled via `options.reasoning` (`undefined` off, level string on). A directly-supplied `options.reasoningEffort` is dropped by pi-ai and silently leaves thinking in the wrong state. Grounds the §25.6 implementation note.
+* **`maxTokens` not enforced.** z.ai did not reliably honor `maxTokens` (observed ~733 output tokens emitted under a 220-token limit). Grounds the §25.6 note to rely on the stream's terminal event rather than the token cap for completion.
+
+## P.4 Re-validation checklist
+
+Before treating any number above as dependable: re-run P.1 (reuse quality) and P.2 (cache + TTFT) against the current production model and endpoint; confirm the §25.6 option-key and `maxTokens` behaviors still hold. Provider-side changes (model version, caching policy, parameter enforcement) can shift every result in this appendix.

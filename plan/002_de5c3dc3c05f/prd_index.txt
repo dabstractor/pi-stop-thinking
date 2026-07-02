@@ -1,0 +1,443 @@
+h1.0 Product Requirements Document (PRD)
+ h2.0 Pi Extension: Stop Thinking & Do
+  h3.0 Version 1.0 (Production MVP)
+  h3.1 Status: Draft
+  h3.2 Target Platform: Pi Coding Agent
+  h3.3 Target Provider: z.ai (OpenAI-Compatible API)
+  h3.4 Document Part 1 — Product Definition, Vision, Requirements & High-Level Architecture
+h1.1 1. Executive Summary
+h1.2 2. Problem Statement
+h1.3 3. Product Vision
+h1.4 4. Product Goals
+ h2.1 G1
+ h2.2 G2
+ h2.3 G3
+ h2.4 G4
+ h2.5 G5
+ h2.6 G6
+ h2.7 G7
+h1.5 5. Non-Goals
+ h2.8 NG1
+ h2.9 NG2
+ h2.10 NG3
+ h2.11 NG4
+ h2.12 NG5
+ h2.13 NG6
+h1.6 6. Architectural Decision Records
+h1.7 ADR-001
+ h2.14 Reasoning Cannot Be Interrupted Server-Side
+  h3.5 Status
+  h3.6 Context
+  h3.7 Decision
+  h3.8 Consequences
+h1.8 ADR-002
+ h2.15 The Agent Loop Is Not The Correct Interception Layer
+  h3.9 Status
+  h3.10 Context
+  h3.11 Decision
+  h3.12 Consequences
+h1.9 ADR-003
+ h2.16 Decorate The Built-In Provider
+  h3.13 Status
+  h3.14 Context
+  h3.15 Decision
+  h3.16 Consequences
+h1.10 ADR-004
+ h2.17 z.ai Is The Only Required Provider
+  h3.17 Status
+  h3.18 Context
+  h3.19 Decision
+h1.11 ADR-005
+ h2.18 The Wrapper Must Be Observationally Equivalent
+  h3.20 Status
+h1.12 ADR-006
+ h2.19 Reasoning Reuse via Ephemeral Text Injection
+  h3.21 Status
+  h3.22 Context
+  h3.23 Decision
+  h3.24 Empirical basis
+  h3.25 Consequences
+  h3.26 Alternatives considered
+h1.13 7. User Stories
+ h2.20 Primary User
+  h3.27 Story 1
+  h3.28 Story 2
+  h3.29 Story 3
+  h3.30 Story 4
+  h3.31 Story 5
+  h3.32 Story 6
+h1.14 8. User Experience Specification
+ h2.21 Normal Flow
+ h2.22 Stop Thinking Flow
+ h2.23 Failure Flow
+h1.15 9. Product Principles
+ h2.24 Principle 1
+ h2.25 Principle 2
+ h2.26 Principle 3
+ h2.27 Principle 4
+ h2.28 Principle 5
+ h2.29 Principle 6
+h1.16 10. High-Level Architecture
+h1.17 11. Major Components
+h1.18 12. System Architecture
+ h2.30 12.1 Overview
+ h2.31 12.2 Why the Provider Boundary
+  h3.33 Option A
+  h3.34 Option B
+  h3.35 Option C
+ h2.32 12.3 Layer Diagram
+h1.19 13. Component Architecture
+h1.20 13.1 Provider Decorator
+ h2.33 Responsibility
+ h2.34 Responsibilities
+ h2.35 Non-responsibilities
+ h2.36 Lifecycle
+h1.21 13.2 Stream Proxy
+ h2.37 Responsibility
+  h3.36 Inputs
+  h3.37 Outputs
+  h3.38 Guarantees
+ h2.38 Invariant
+h1.22 13.3 Transition State Machine
+ h2.39 Principle
+h1.23 13.4 Reasoning Buffer
+ h2.40 Responsibilities
+ h2.41 Non-responsibilities
+h1.24 13.5 User Interaction Layer
+h1.25 14. Stream Lifecycle
+ h2.42 14.1 Normal Lifecycle
+ h2.43 14.2 Stop Thinking Lifecycle
+ h2.44 14.3 Internal Lifecycle
+h1.26 15. State Machine
+ h2.45 States
+ h2.46 State Descriptions
+  h3.39 Idle
+  h3.40 Delegating
+  h3.41 Reasoning
+  h3.42 StopRequested
+  h3.43 Aborting
+  h3.44 Capturing
+  h3.45 Restarting
+  h3.46 Splicing
+  h3.47 Answering
+  h3.48 Completed
+  h3.49 Failed
+h1.27 16. State Transition Table
+h1.28 17. State Invariants
+ h2.47 Idle
+ h2.48 Delegating
+ h2.49 Reasoning
+ h2.50 StopRequested
+ h2.51 Aborting
+ h2.52 Capturing
+ h2.53 Restarting
+ h2.54 Splicing
+ h2.55 Answering
+ h2.56 Completed
+ h2.57 Failed
+ h2.58 Reasoning-Disabled Scope
+h1.29 18. Event Forwarding Rules
+h1.30 19. Provider Decoration Architecture
+ h2.59 19.1 Design Philosophy
+ h2.60 19.2 Initialization Sequence
+ h2.61 19.3 Capturing the Built-in Provider
+ h2.62 19.4 Wrapper Responsibilities
+ h2.63 19.5 Wrapper Decision Tree
+ h2.64 19.6 Activation Conditions
+  h3.50 Condition A
+  h3.51 Condition B
+  h3.52 Condition C
+  h3.53 Condition D
+  h3.54 Condition E
+ h2.65 19.7 Pass-through Guarantee
+h1.31 20. Stream Proxy Design
+ h2.66 20.1 Purpose
+ h2.67 20.2 Inputs
+ h2.68 20.3 Output
+ h2.69 20.4 Internal Structure
+ h2.70 20.5 Queue Ownership
+ h2.71 20.6 Event Authority
+h1.32 21. Stream Splicing Algorithm
+ h2.72 21.1 Goal
+ h2.73 21.2 Conceptual Algorithm
+ h2.74 21.3 Splice Boundary
+ h2.75 21.4 Primary Stream Rules
+ h2.76 21.5 Secondary Stream Rules
+ h2.77 21.6 Completion Ownership
+h1.33 22. Reasoning Detection
+ h2.78 22.1 Purpose
+ h2.79 22.2 Detection Source
+ h2.80 22.3 Enter Reasoning
+ h2.81 22.4 Leave Reasoning
+ h2.82 22.5 Shortcut Availability
+h1.34 23. Reasoning Buffer
+ h2.83 23.1 Purpose
+ h2.84 23.2 Design
+ h2.85 23.3 Buffer Lifetime
+ h2.86 23.4 Memory Constraints
+ h2.87 23.5 Overflow
+h1.35 24. Stop Signal
+ h2.88 24.1 Source
+ h2.89 24.2 Semantics
+ h2.90 24.3 Idempotency
+ h2.91 24.4 Lifetime
+h1.36 25. Replacement Request Construction
+ h2.92 25.1 Overview
+ h2.93 25.2 Design Goals
+ h2.94 25.3 Context Reuse
+ h2.95 25.4 Prompt Reuse
+ h2.96 25.5 System Prompt
+ h2.97 25.6 Thinking Configuration
+ h2.98 25.7 Model Selection
+ h2.99 25.8 Temperature
+h1.37 26. Prompt Morphing Philosophy
+h1.38 Part 4 — Internal Interfaces & Module Specifications
+h1.39 Part 5 — Complete Event Specification
+h1.40 Part 6 — Failure Modes
+h1.41 Part 7 — Configuration Specification
+h1.42 Part 8 — Observability
+h1.43 Part 9 — Performance Requirements
+h1.44 Part 10 — Test Plan
+h1.45 Part 11 — Acceptance Criteria
+h1.46 Part 12 — Future Architecture
+h1.47 27. Internal Module Specification
+ h2.100 27.1 Module Overview
+h1.48 28. ProviderDecorator Module
+ h2.101 Responsibility
+ h2.102 Owns
+ h2.103 Does Not Own
+ h2.104 Public Interface
+ h2.105 Private State
+ h2.106 Invariants
+h1.49 29. StreamProxy Module
+ h2.107 Responsibility
+ h2.108 Owns
+ h2.109 Does Not Own
+ h2.110 Public Interface
+ h2.111 Internal Data
+ h2.112 Invariants
+h1.50 30. TransitionController Module
+ h2.113 Responsibility
+ h2.114 Public Interface
+ h2.115 Internal State
+ h2.116 Invariants
+h1.51 31. RequestBuilder Module
+ h2.117 Responsibility
+ h2.118 Inputs
+ h2.119 Outputs
+ h2.120 Rules
+ h2.121 Non-responsibilities
+h1.52 32. ReasoningBuffer Module
+ h2.122 Responsibility
+ h2.123 Internal Representation
+ h2.124 Operations
+ h2.125 Invariants
+h1.53 33. ShortcutManager Module
+ h2.126 Responsibility
+ h2.127 Responsibilities
+ h2.128 Invariants
+h1.54 34. EventNormalizer Module
+ h2.129 Responsibility
+ h2.130 Responsibilities
+ h2.131 Rules
+h1.55 35. Telemetry Module
+ h2.132 Responsibility
+ h2.133 Metrics
+ h2.134 Privacy
+h1.56 36. Diagnostics Module
+ h2.135 Responsibility
+ h2.136 Diagnostic Modes
+h1.57 37. Concurrency Model
+ h2.137 Ownership Rules
+h1.58 38. Event Ordering Specification
+ h2.138 Ordering Guarantee
+ h2.139 Legal Event Sequence
+ h2.140 Illegal Event Sequence
+h1.59 39. Transition Event Rules
+h1.60 40. Replacement Stream Requirements
+h1.61 41. Buffer Ownership During Transition
+h1.62 42. Failure Mode Specification
+ h2.141 FM-001
+ h2.142 FM-002
+ h2.143 FM-003
+ h2.144 FM-004
+ h2.145 FM-005
+ h2.146 FM-006
+ h2.147 FM-007
+ h2.148 FM-008
+ h2.149 FM-009
+ h2.150 FM-010
+ h2.151 FM-011
+ h2.152 FM-012
+ h2.153 FM-013
+ h2.154 FM-014
+ h2.155 FM-015
+h1.63 43. Timeout Requirements
+h1.64 44. Resource Management
+h1.65 45. Memory Requirements
+h1.66 46. Performance Requirements
+h1.67 47. Configuration Specification
+h1.68 48. Acceptance Criteria
+h1.69 49. Future Compatibility
+h1.70 50. Implementation Roadmap
+ h2.156 Phase 0 — Foundation
+  h3.55 Deliverables
+  h3.56 Success Criteria
+ h2.157 Phase 1 — Event Proxy
+  h3.57 Deliverables
+  h3.58 Success Criteria
+ h2.158 Phase 2 — Transition State Machine
+  h3.59 Deliverables
+  h3.60 Success Criteria
+ h2.159 Phase 3 — Reasoning Detection
+  h3.61 Deliverables
+  h3.62 Success Criteria
+ h2.160 Phase 4 — Abort Coordination
+  h3.63 Deliverables
+  h3.64 Success Criteria
+ h2.161 Phase 5 — Replacement Generation
+  h3.65 Deliverables
+  h3.66 Success Criteria
+ h2.162 Phase 6 — Stream Splicing
+  h3.67 Deliverables
+  h3.68 Success Criteria
+ h2.163 Phase 7 — Hardening
+  h3.69 Deliverables
+h1.71 51. Complete Transition Algorithm
+ h2.164 Initial State
+ h2.165 Stream Processing Loop
+ h2.166 Stop Request
+ h2.167 Abort Phase
+ h2.168 Replacement Phase
+ h2.169 Authority Transfer
+ h2.170 Completion
+h1.72 52. Detailed Event Processing Rules
+ h2.171 Validation Rules
+ h2.172 Ordering Validation
+ h2.173 Duplicate Detection
+h1.73 53. Replacement Request Specification
+ h2.174 Inputs
+ h2.175 Transformation Rules
+ h2.176 Ephemeral Execution Directive
+  h3.70 What is injected
+  h3.71 Delimiter format
+  h3.72 Positioning (non-continuation requirement)
+  h3.73 Ephemeral / scoping rules
+  h3.74 Reasoning-disabled scope (invariant)
+h1.74 54. Error Recovery
+ h2.177 Recovery Hierarchy
+h1.75 55. Testing Strategy
+ h2.178 Unit Tests
+ h2.179 Integration Tests
+ h2.180 Golden Replay Tests
+ h2.181 Transition Replay
+ h2.182 Property Tests
+ h2.183 Stress Tests
+h1.76 56. Observability
+h1.77 57. Logging Specification
+h1.78 58. Security Considerations
+h1.79 59. Architectural Constraints
+h1.80 60. Production Readiness Checklist
+ h2.184 Functional
+ h2.185 Reliability
+ h2.186 Performance
+ h2.187 Maintainability
+h1.81 Appendix A — Glossary
+h1.82 Appendix B — Edge Case Matrix
+h1.83 EC-001 — Shortcut Before First Provider Event
+ h2.188 Initial State
+ h2.189 Expected Behavior
+ h2.190 Rationale
+h1.84 EC-002 — Shortcut During Network Stall
+ h2.191 Scenario
+ h2.192 Expected Behavior
+h1.85 EC-003 — Provider Never Enters Reasoning
+ h2.193 Expected Behavior
+h1.86 EC-004 — Provider Immediately Answers
+h1.87 EC-005 — Shortcut During thinking_end
+ h2.194 Expected Behavior
+h1.88 EC-006 — Shortcut During First Answer Token
+h1.89 EC-007 — Provider Finishes While Abort Is Dispatching
+h1.90 EC-008 — Abort Completes After Replacement Starts
+h1.91 EC-009 — Duplicate Shortcut
+h1.92 EC-010 — Shortcut Held Down
+h1.93 EC-011 — Extension Disabled Mid-Request
+h1.94 EC-012 — Extension Unloaded Mid-Transition
+h1.95 EC-013 — Provider Reload
+h1.96 EC-014 — Unsupported Model
+h1.97 EC-015 — Unsupported Provider
+h1.98 EC-016 — Feature Disabled
+h1.99 EC-017 — Replacement Request Returns Reasoning Anyway
+h1.100 EC-018 — Provider Returns Empty Response
+h1.101 EC-019 — Provider Returns Error Immediately
+h1.102 EC-020 — Malformed Thinking Event
+h1.103 Appendix C — Race Conditions
+h1.104 RC-001
+h1.105 RC-002
+h1.106 RC-003
+h1.107 RC-004
+h1.108 RC-005
+h1.109 RC-006
+h1.110 Appendix D — Sequence Diagrams
+ h2.195 Normal Request
+ h2.196 Interrupted Request
+h1.111 Appendix E — Implementation Constraints
+ h2.197 Prohibited
+ h2.198 Strongly Discouraged
+h1.112 Appendix F — Coding Standards
+h1.113 Appendix G — Architectural Success Criteria
+h1.114 Appendix H — Security & Privacy Model
+ h2.199 Security Objectives
+ h2.200 Trust Boundaries
+ h2.201 Sensitive Data
+ h2.202 Storage Rules
+ h2.203 Logging Rules
+h1.115 Appendix I — Telemetry Schema
+ h2.204 Event: TransitionStarted
+ h2.205 Event: TransitionCompleted
+ h2.206 Event: TransitionFailed
+ h2.207 Failure Categories
+ h2.208 Performance Counters
+h1.116 Appendix J — Extension Manifest Requirements
+ h2.209 Required Permissions
+h1.117 Appendix K — Configuration Schema
+ h2.210 Configuration Validation Rules
+ h2.211 Configuration Source & Limitations
+h1.118 Appendix L — Compatibility Matrix
+ h2.212 Provider Matrix
+ h2.213 Model Matrix
+h1.119 Appendix M — Developer Debugging Guide
+ h2.214 Trace Levels
+  h3.75 Error
+  h3.76 Warning
+  h3.77 Info
+  h3.78 Debug
+  h3.79 Trace
+ h2.215 Trace Correlation
+h1.120 Appendix N — Future Extension Points
+ h2.216 Capability Detection
+ h2.217 Provider Adapters
+ h2.218 Native Interrupt Support
+ h2.219 Adaptive Policies
+h1.121 Appendix O — Formal Invariants
+ h2.220 INV-001
+ h2.221 INV-002
+ h2.222 INV-003
+ h2.223 INV-004
+ h2.224 INV-005
+ h2.225 INV-006
+ h2.226 INV-007
+ h2.227 INV-008
+ h2.228 INV-009
+ h2.229 INV-010
+ h2.230 INV-011
+ h2.231 INV-012
+ h2.232 INV-013
+ h2.233 INV-014
+h1.122 Appendix P — Empirical Basis
+ h2.234 P.1 Reasoning reuse (answer quality)
+ h2.235 P.2 Prompt caching and replacement latency
+ h2.236 P.3 Implementation hazards observed
+ h2.237 P.4 Re-validation checklist
+---
+code:60 para:1291 list:45 table:5 quote:7

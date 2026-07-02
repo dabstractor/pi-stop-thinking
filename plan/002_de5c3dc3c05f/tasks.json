@@ -65,7 +65,7 @@
           "type": "Milestone",
           "id": "P2.M2",
           "title": "Directive Construction & Integration — Core §53 Implementation",
-          "status": "Planned",
+          "status": "Ready",
           "description": "Implement the Ephemeral Execution Directive: render the frozen ReasoningBuffer snapshot to plain text, wrap it in the configured delimiter fence, and inject it as ephemeral reference context into a non-mutating copy of the replacement request's Context. Modify RequestBuilder.buildReplacement (which currently accepts reasoningSnapshot but does NOT read it), thread config through StreamProxy into the builder, and update the decorator call site.",
           "tasks": [
             {
@@ -98,14 +98,14 @@
               "type": "Task",
               "id": "P2.M2.T2",
               "title": "Modify RequestBuilder for directive injection (gated, non-mutating)",
-              "status": "Researching",
+              "status": "Complete",
               "description": "Modify RequestBuilder's constructor to accept the directive config fields and modify buildReplacement to actually READ the reasoningSnapshot: render it to text, gate on config.reasoningInjection && non-empty, construct the directive message with the delimiter fence, inject into a fresh Context COPY (non-mutating), and set a bounded maxTokens. This is the core implementation of PRD §53 and the satisfaction point for INV-013.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P2.M2.T2.S1",
                   "title": "Modify RequestBuilder constructor + buildReplacement for gated directive injection",
-                  "status": "Researching",
+                  "status": "Complete",
                   "story_points": 2,
                   "dependencies": [
                     "P2.M1.T1.S1",
@@ -153,14 +153,14 @@
               "type": "Task",
               "id": "P2.M2.T3",
               "title": "Wire directive config through StreamProxy into RequestBuilder",
-              "status": "Planned",
+              "status": "Ready",
               "description": "Thread the two new config fields from Config through the StreamProxy constructor (which constructs the RequestBuilder) and update the ProviderDecorator's StreamProxy construction call site to pass config.reasoningInjection and config.reasoningInjectionDelimiter. The proxy itself does no directive logic — it merely forwards the config to the builder it self-creates.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P2.M2.T3.S1",
                   "title": "Thread config fields through StreamProxy ctor + update decorator call site",
-                  "status": "Planned",
+                  "status": "Ready",
                   "story_points": 1,
                   "dependencies": [
                     "P2.M2.T2.S1"

@@ -5,6 +5,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- Reasoning reuse via ephemeral text injection (ADR-006 / §53): when you stop thinking, the captured reasoning is injected as ephemeral, delimited reference context into the thinking-disabled replacement request so the model conditions its answer on its own prior reasoning. Quality is proportional to how much material reasoning was captured before the shortcut. Configurable via `reasoningInjection` (default: on) and `reasoningInjectionDelimiter`. — P2
+
 ### Fixed
 
 - Reasoning is now preserved in the persisted assistant message on interruption (content assembles as `[thinking, text]`, matching a normal response) — P1.M2.

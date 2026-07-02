@@ -194,14 +194,14 @@
               "type": "Task",
               "id": "P2.M3.T1",
               "title": "Config + RequestBuilder directive test coverage",
-              "status": "Planned",
+              "status": "Researching",
               "description": "Extend the existing config tests for the two new fields and add comprehensive RequestBuilder directive tests covering content/format, gated fallback, non-mutation of original context/options, privacy (debug fields {}), and the formal invariants INV-013 (reasoning reused) and INV-014 (reasoning-disabled scope).",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P2.M3.T1.S1",
                   "title": "Extend config tests for reasoningInjection + reasoningInjectionDelimiter",
-                  "status": "Researching",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [
                     "P2.M1.T1.S1",
@@ -220,7 +220,7 @@
                   "type": "Subtask",
                   "id": "P2.M3.T1.S2",
                   "title": "RequestBuilder directive + invariant tests (INV-013, INV-014)",
-                  "status": "Planned",
+                  "status": "Researching",
                   "story_points": 2,
                   "dependencies": [
                     "P2.M2.T2.S1"

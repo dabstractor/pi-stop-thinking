@@ -97,12 +97,48 @@ describe("validateConfig — per-field fallback (strict types, no coercion)", ()
       expect(validateConfig({ diagnosticsLevel: bad }).diagnosticsLevel).toBe("error");
     }
   });
+  test("reasoningInjection (strict boolean)", () => {
+    expect(validateConfig({ reasoningInjection: false }).reasoningInjection).toBe(false); // valid
+    expect(validateConfig({ reasoningInjection: true }).reasoningInjection).toBe(true);   // valid
+    for (const bad of ["true", 1, 0, null, undefined]) {
+      expect(validateConfig({ reasoningInjection: bad }).reasoningInjection).toBe(true);  // invalid -> default
+    }
+  });
+  test("reasoningInjectionDelimiter (open & close both non-empty)", () => {
+    // valid: passes through as a fresh copy
+    expect(validateConfig({ reasoningInjectionDelimiter: { open: "x", close: "y" } })
+      .reasoningInjectionDelimiter).toEqual({ open: "x", close: "y" });
+    // invalid: missing a part, empty part, wrong type, null, undefined -> default object
+    for (const bad of [
+      { open: "x" },            // missing close
+      { close: "y" },           // missing open
+      { open: "", close: "y" }, // empty open
+      "x",                       // non-object (string)
+      42,                        // non-object (number)
+      [],                        // array (no open/close)
+      null,
+      undefined,
+    ]) {
+      expect(validateConfig({ reasoningInjectionDelimiter: bad }).reasoningInjectionDelimiter)
+        .toEqual({ ...DEFAULT_CONFIG.reasoningInjectionDelimiter });
+    }
+  });
 });
 
 describe("validateConfig — composition rules", () => {
   test("one invalid field does not poison valid fields", () => {
     const r = validateConfig({ enabled: false, transitionTimeoutMs: "bad", shortcut: "escape" });
     expect(r).toEqual({ ...FULL_DEFAULTS, enabled: false, shortcut: "escape" });
+  });
+  test("one invalid directive field does not poison the other directive field", () => {
+    // invalid reasoningInjection (string) -> default true; valid delimiter kept
+    const a = validateConfig({ reasoningInjection: "bad", reasoningInjectionDelimiter: { open: "p", close: "q" } });
+    expect(a.reasoningInjection).toBe(true);
+    expect(a.reasoningInjectionDelimiter).toEqual({ open: "p", close: "q" });
+    // valid reasoningInjection kept; invalid delimiter (non-object) -> default
+    const b = validateConfig({ reasoningInjection: false, reasoningInjectionDelimiter: "bad" });
+    expect(b.reasoningInjection).toBe(false);
+    expect(b.reasoningInjectionDelimiter).toEqual({ ...DEFAULT_CONFIG.reasoningInjectionDelimiter });
   });
   test("unknown keys are ignored", () => {
     const r = validateConfig({ enabled: false, unknownKey: 123, debugMode: true });

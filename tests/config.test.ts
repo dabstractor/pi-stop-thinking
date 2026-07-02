@@ -10,6 +10,11 @@ const FULL_DEFAULTS = {
   maximumReasoningBufferBytes: 8388608,
   telemetryEnabled: false,
   diagnosticsLevel: "error",
+  reasoningInjection: true,
+  reasoningInjectionDelimiter: {
+    open: "---\n[Prior reasoning captured before you were asked to stop thinking]",
+    close: "[End of prior reasoning]\n---",
+  },
 };
 
 describe("DEFAULT_CONFIG", () => {

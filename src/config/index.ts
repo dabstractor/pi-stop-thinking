@@ -35,6 +35,29 @@ export interface Config {
   telemetryEnabled: boolean;
   /** Diagnostics verbosity level. Default: `"error"`. */
   diagnosticsLevel: DiagnosticsLevel;
+  /**
+   * Whether the Ephemeral Execution Directive is enabled (PRD §47 / ADR-006 / §53): the captured
+   * reasoning snapshot is injected into the replacement request as ephemeral, clearly-fenced
+   * reference context (INPUT injection for the model to reuse), NOT output stitching. When `false`
+   * (or the snapshot is empty) the replacement behaves as a from-scratch thinking-disabled answer.
+   * Default: `true`. Env: `PI_STOP_THINKING_REASONING_INJECTION`.
+   *
+   * [Appendix H privacy] Enabling this does NOT cause reasoning text to be logged, telemetered, or
+   * persisted beyond the single ephemeral replacement request; diagnostics never log reasoning text.
+   */
+  reasoningInjection: boolean;
+  /**
+   * The open/close fence text wrapping the injected reasoning block (PRD §47 / §53 h3.71 /
+   * Appendix K h1.117). Defaults to a deterministic, clearly-labeled fence so the model can
+   * unambiguously distinguish prior reasoning from the live prompt. Both parts must be non-empty
+   * strings; an invalid value on EITHER part falls back to the ENTIRE default delimiter object.
+   * Changing this does not affect the shortcut or the env-var config mechanism.
+   * Default: `{ open: "---\n[Prior reasoning captured before you were asked to stop thinking]",
+   *            close: "[End of prior reasoning]\n---" }`.
+   * Env: `PI_STOP_THINKING_REASONING_INJECTION_DELIMITER_OPEN` /
+   *      `PI_STOP_THINKING_REASONING_INJECTION_DELIMITER_CLOSE` (parsing is P2.M1.T1.S2).
+   */
+  reasoningInjectionDelimiter: { open: string; close: string };
 }
 
 /**
@@ -50,6 +73,11 @@ export const DEFAULT_CONFIG: Config = Object.freeze({
   maximumReasoningBufferBytes: 8388608,
   telemetryEnabled: false,
   diagnosticsLevel: "error",
+  reasoningInjection: true,
+  reasoningInjectionDelimiter: Object.freeze({
+    open: "---\n[Prior reasoning captured before you were asked to stop thinking]",
+    close: "[End of prior reasoning]\n---",
+  }),
 }) as Config;
 
 // --- per-field type guards (strict; NO coercion) ---
@@ -64,6 +92,11 @@ const isNonEmptyStringArray = (v: unknown): v is string[] =>
 const DIAGNOSTICS_LEVELS: readonly DiagnosticsLevel[] = ["error", "warn", "info", "debug", "trace"];
 const isDiagnosticsLevel = (v: unknown): v is DiagnosticsLevel =>
   typeof v === "string" && (DIAGNOSTICS_LEVELS as readonly string[]).includes(v);
+const isOpenCloseShape = (v: unknown): v is { open: string; close: string } =>
+  typeof v === "object" && v !== null &&
+  "open" in v && "close" in v &&
+  typeof (v as { open: unknown }).open === "string" && (v as { open: string }).open.length > 0 &&
+  typeof (v as { close: unknown }).close === "string" && (v as { close: string }).close.length > 0;
 
 /** Return `value` when it satisfies `guard`, otherwise `fallback`. */
 function pick<T>(value: unknown, guard: (v: unknown) => v is T, fallback: T): T {
@@ -109,6 +142,10 @@ export function validateConfig(config: unknown): Config {
     ),
     telemetryEnabled: pick(src.telemetryEnabled, isBool, DEFAULT_CONFIG.telemetryEnabled),
     diagnosticsLevel: pick(src.diagnosticsLevel, isDiagnosticsLevel, DEFAULT_CONFIG.diagnosticsLevel),
+    reasoningInjection: pick(src.reasoningInjection, isBool, DEFAULT_CONFIG.reasoningInjection),
+    reasoningInjectionDelimiter: isOpenCloseShape(src.reasoningInjectionDelimiter)
+      ? { open: src.reasoningInjectionDelimiter.open, close: src.reasoningInjectionDelimiter.close }
+      : { ...DEFAULT_CONFIG.reasoningInjectionDelimiter },
   };
 }
 
